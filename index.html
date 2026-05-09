@@ -128,7 +128,15 @@ let syncTimer = null;
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
 
 function saveConfig() {
-  cfg = { proxyUrl: document.getElementById('cfg-proxy').value.trim(), subdomain: document.getElementById('cfg-subdomain').value.trim(), apikey: document.getElementById('cfg-apikey').value.trim() };
+  const proxyUrl = document.getElementById('cfg-proxy').value.trim();
+  const subdomain = document.getElementById('cfg-subdomain').value.trim();
+  const apikey = document.getElementById('cfg-apikey').value.trim();
+  console.log('Saving config:', { proxyUrl, subdomain, apikey: apikey ? '***' : 'EMPTY' });
+  if (!proxyUrl || !subdomain || !apikey) {
+    alert('جميع الحقول مطلوبة');
+    return;
+  }
+  cfg = { proxyUrl, subdomain, apikey };
   localStorage.setItem('wk_cfg', JSON.stringify(cfg));
   toggleSettings();
   syncDaftra();
