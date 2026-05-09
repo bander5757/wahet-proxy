@@ -70,11 +70,15 @@
     أدخل بيانات دفترة ثم اضغط حفظ
   </div>
   <div class="label">رابط Vercel الوسيط</div>
-  <input id="cfg-proxy" type="text" placeholder="https://your-app.vercel.app/api/daftra" style="margin-bottom:10px">
+  <input id="cfg-proxy" type="text" placeholder="https://your-app.vercel.app/api/daftra" autocomplete="off" style="margin-bottom:10px">
   <div class="label">Subdomain في دفترة</div>
-  <input id="cfg-subdomain" type="text" placeholder="wkaimah" style="margin-bottom:10px">
+  <input id="cfg-subdomain" type="text" placeholder="wkaimah" autocomplete="off" style="margin-bottom:10px">
   <div class="label">مفتاح API</div>
-  <input id="cfg-apikey" type="password" placeholder="API Key" style="margin-bottom:12px">
+  <div style="position:relative">
+    <input id="cfg-apikey" type="text" placeholder="API Key" autocomplete="off" style="margin-bottom:12px;padding-left:60px">
+    <button type="button" onclick="toggleApiKeyVisibility()" id="apikey-toggle"
+      style="position:absolute;left:6px;top:50%;transform:translateY(-60%);background:transparent;border:none;color:#9a9898;font-size:11px;padding:2px 6px;cursor:pointer">إخفاء</button>
+  </div>
   <div class="flex gap-8">
     <button class="btn-primary" onclick="saveConfig()">حفظ والمزامنة</button>
     <button class="btn-secondary" onclick="toggleSettings()">إلغاء</button>
@@ -122,24 +126,57 @@ const COLORS = {'عرض_سعر':'#B5D4F4','موافق':'#FAC775','فاتورة_�
 const CTXT  = {'عرض_سعر':'#0C447C','موافق':'#633806','فاتورة_صادرة':'#27500A','تم_التركيب':'#085041','مكتمل':'#3C3489'};
 
 let clients = [];
-let cfg = JSON.parse(localStorage.getItem('wk_cfg') || '{"subdomain":"","apikey":"","proxyUrl":""}');
+let cfg = {};
+try { cfg = JSON.parse(localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
+cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, cfg);
 let syncTimer = null;
+const omarWaMsgs = {};
+const accWaMsgs = {};
 
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
 
 function saveConfig() {
   const proxyUrl = document.getElementById('cfg-proxy').value.trim();
   const subdomain = document.getElementById('cfg-subdomain').value.trim();
-  const apikey = document.getElementById('cfg-apikey').value.trim();
-  console.log('Saving config:', { proxyUrl, subdomain, apikey: apikey ? '***' : 'EMPTY' });
-  if (!proxyUrl || !subdomain || !apikey) {
-    alert('جميع الحقول مطلوبة');
-    return;
-  }
+  const apikey = document.getElementById('cfg-apikey').value.trim() || cfg.apikey;
+  if (!proxyUrl) { alert('الحقل المطلوب: رابط Vercel الوسيط'); return; }
+  if (!subdomain) { alert('الحقل المطلوب: Subdomain'); return; }
+  if (!apikey)    { alert('الحقل المطلوب: مفتاح API'); return; }
   cfg = { proxyUrl, subdomain, apikey };
-  localStorage.setItem('wk_cfg', JSON.stringify(cfg));
+  try {
+    localStorage.setItem('wk_cfg', JSON.stringify(cfg));
+  } catch(e) {
+    showMsg('⚠️ تعذّر الحفظ في المتصفح، البيانات مؤقتة للجلسة الحالية فقط');
+  }
   toggleSettings();
+  showMsg('✅ تم حفظ الإعدادات — Subdomain: ' + subdomain);
   syncDaftra();
+}
+
+function toggleApiKeyVisibility() {
+  const inp = document.getElementById('cfg-apikey');
+  const btn = document.getElementById('apikey-toggle');
+  if (inp.style.webkitTextSecurity === 'disc' || inp.getAttribute('data-hidden') === '1') {
+    inp.style.webkitTextSecurity = '';
+    inp.style.textSecurity = '';
+    inp.setAttribute('data-hidden', '0');
+    btn.textContent = 'إخفاء';
+  } else {
+    inp.style.webkitTextSecurity = 'disc';
+    inp.style.textSecurity = 'disc';
+    inp.setAttribute('data-hidden', '1');
+    btn.textContent = 'إظهار';
+  }
+}
+
+function sendOmarWa(key) {
+  const msg = omarWaMsgs[key];
+  if (msg) window.open('https://wa.me/00966506834579?text=' + encodeURIComponent(msg));
+}
+
+function sendAccWa(key) {
+  const msg = accWaMsgs[key];
+  if (msg) window.open('https://wa.me/00966532694558?text=' + encodeURIComponent(msg));
 }
 
 function loadConfigUI() {
@@ -300,23 +337,60 @@ function render() {
   const notifs = clients.flatMap(c => {
     const a = [];
     if (c.stage === 'عرض_سعر') a.push({type:'warning',text:'متابعة موافقة العميل: '+c.name,phone:c.phone});
-    if (c.stage === 'فاتورة_صادرة') a.push({type:'info',text:'تنبيه المحاسب: الدفعة الأولى — '+c.name+' ('+c.deposit.toLocaleString()+' ر.س)',phone:c.phone});
+    if (c.stage === 'فاتورة_صادرة') {
+      const accKey = 'acc_' + c.id;
+      accWaMsgs[accKey] = [
+        'مرحباً 💰',
+        'فاتورة جديدة — الدفعة الأولى:',
+        'العميل: ' + c.name,
+        'قيمة الدفعة الأولى: ' + c.deposit.toLocaleString() + ' ر.س',
+        c.daftraNo ? 'رقم الفاتورة: #' + c.daftraNo : '',
+        'واحة الخيمة 🏕️'
+      ].filter(Boolean).join('\n');
+      a.push({type:'info', text:'تنبيه المحاسب: الدفعة الأولى — '+c.name+' ('+c.deposit.toLocaleString()+' ر.س)', accKey});
+    }
     const d = daysUntil(c.installDate);
-    if (c.stage === 'فاتورة_صادرة' && d !== null && d <= 2 && d >= 0)
-      a.push({type:'success',text:'تنبيه عمر: تركيب '+c.name+' بعد '+d+' يوم — '+c.location,phone:c.phone});
+    if ((c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب') && d === 0) {
+      const acc2Key = 'acc2_' + c.id;
+      accWaMsgs[acc2Key] = [
+        'مرحباً 💰',
+        'يوم التركيب — الدفعة الثانية:',
+        'العميل: ' + c.name,
+        'قيمة الدفعة الثانية: ' + c.remaining.toLocaleString() + ' ر.س',
+        c.daftraNo ? 'رقم الفاتورة: #' + c.daftraNo : '',
+        'واحة الخيمة 🏕️'
+      ].filter(Boolean).join('\n');
+      a.push({type:'info', text:'تنبيه المحاسب: الدفعة الثانية — '+c.name+' ('+c.remaining.toLocaleString()+' ر.س)', accKey: acc2Key});
+    }
+    if (c.stage === 'فاتورة_صادرة' && d !== null && d <= 2 && d >= 0) {
+      const dLabel = d === 0 ? 'اليوم' : d === 1 ? 'غداً' : 'بعد يومين';
+      const omarKey = 'omar_' + c.id;
+      omarWaMsgs[omarKey] = [
+        'مرحباً عمر 👷',
+        'تذكير بموعد تركيب ' + dLabel + ':',
+        'العميل: ' + c.name,
+        'المنتجات: ' + (c.products || '—'),
+        'الموقع: ' + (c.location || '—'),
+        'تاريخ التركيب: ' + c.installDate,
+        'واحة الخيمة 🏕️'
+      ].join('\n');
+      a.push({type:'omar', text:'تنبيه عمر 👷 — تركيب '+c.name+' '+dLabel+' — '+c.location, omarKey});
+    }
     return a;
   });
   const nb = document.getElementById('notif-badge');
   nb.style.display = notifs.length ? 'flex' : 'none';
   nb.textContent = notifs.length;
-  const nbg = {warning:'#2a1f00',info:'#001a2e',success:'#001a0e'};
-  const ntx = {warning:'#FAC775',info:'#85B7EB',success:'#5DCAA5'};
+  const nbg = {warning:'#2a1f00',info:'#001a2e',success:'#001a0e',omar:'#271500'};
+  const ntx = {warning:'#FAC775',info:'#85B7EB',success:'#5DCAA5',omar:'#EF9F27'};
   document.getElementById('notif-list').innerHTML = notifs.length ? notifs.map(n =>
-    `<div class="notif" style="background:${nbg[n.type]}">
-      <span>${n.type==='warning'?'⚠️':n.type==='info'?'💰':'🔧'}</span>
+    `<div class="notif" style="background:${nbg[n.type]};${n.type==='omar'?'border:0.5px solid #EF9F2750;border-radius:8px':''}">
+      <span>${n.type==='warning'?'⚠️':n.type==='info'?'💰':n.type==='omar'?'👷':'🔧'}</span>
       <div style="flex:1">
         <div style="font-size:12px;color:${ntx[n.type]}">${n.text}</div>
         ${n.phone?`<button class="btn-green" style="margin-top:4px;font-size:11px;padding:2px 8px" onclick="window.open('https://wa.me/${n.phone}?text='+encodeURIComponent('تذكير 🏕️'))">واتساب</button>`:''}
+        ${n.accKey?`<button class="btn-green" style="margin-top:6px;font-size:11px;padding:3px 10px;background:#25D366" onclick="sendAccWa('${n.accKey}')">📲 إرسال للمحاسب</button>`:''}
+        ${n.omarKey?`<button class="btn-green" style="margin-top:6px;font-size:11px;padding:3px 10px;background:#25D366" onclick="sendOmarWa('${n.omarKey}')">📲 إرسال لعمر</button>`:''}
       </div>
     </div>`).join('') : '<div style="font-size:12px;color:#9a9898">لا توجد تنبيهات</div>';
 
@@ -354,6 +428,8 @@ render();
 if (cfg.subdomain && cfg.apikey && cfg.proxyUrl) {
   syncDaftra();
   syncTimer = setInterval(syncDaftra, 60000);
+} else {
+  toggleSettings(); // فتح الإعدادات تلقائياً عند غياب البيانات
 }
 </script>
 </body>
