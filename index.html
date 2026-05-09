@@ -146,7 +146,8 @@ try { cfg = JSON.parse(localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
 cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, cfg);
 let syncTimer = null;
 const omarWaMsgs = {};
-const accWaMsgs = {};
+const accWaMsgs  = {};
+const dismissed  = new Set();
 
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
 const daysOld   = d => d ? Math.floor((new Date() - new Date(d)) / 86400000) : null;
@@ -183,6 +184,11 @@ function toggleApiKeyVisibility() {
     inp.setAttribute('data-hidden', '1');
     btn.textContent = 'إظهار';
   }
+}
+
+function dismissNotif(id) {
+  dismissed.add(id);
+  renderDashboard();
 }
 
 function sendOmarWa(key) {
@@ -295,8 +301,9 @@ function waMsg(type, id) {
            c.daftraNo ? 'رقم الفاتورة: #' + c.daftraNo : '',
            'واحة الخيمة 🏕️'].filter(Boolean).join('\n');
   } else if (type === 'omar') {
+    const dLabel = daysUntil(c.installDate) === 1 ? 'غداً' : 'بعد يومين';
     phone = '00966506834579';
-    msg = ['مرحباً عمر 👷', 'تذكير بموعد تركيب بعد يومين:', 'العميل: ' + c.name,
+    msg = ['مرحباً عمر 👷', 'تذكير بموعد تركيب ' + dLabel + ':', 'العميل: ' + c.name,
            'المنتجات: ' + (c.products||'—'), 'الموقع: ' + (c.location||'—'),
            'تاريخ التركيب: ' + c.installDate, 'واحة الخيمة 🏕️'].join('\n');
   } else if (type === 'new') {
@@ -317,83 +324,121 @@ function renderDashboard() {
   const el = document.getElementById('daily-content');
   if (!el) return;
   const today = new Date().toISOString().slice(0, 10);
-  document.getElementById('daily-date').textContent =
-    new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  const dd = document.getElementById('daily-date');
+  if (dd) dd.textContent = new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
 
-  const stale    = clients.filter(c => c.stage === 'عرض_سعر' && (daysOld(c.created)||0) > 3);
-  const newToday = clients.filter(c => c.stage === 'عرض_سعر' && c.created === today);
-  const upcoming = clients.filter(c => {
-    const d = daysUntil(c.installDate);
-    return c.stage === 'فاتورة_صادرة' && d !== null && d > 0 && d <= 7;
-  }).sort((a, b) => new Date(a.installDate) - new Date(b.installDate));
+  const stale    = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && (daysOld(c.created)||0) > 3);
+  const newToday = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && c.created === today);
   const todayInst = clients.filter(c =>
-    (c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب') && daysUntil(c.installDate) === 0);
-  const in2days   = clients.filter(c =>
-    c.stage === 'فاتورة_صادرة' && daysUntil(c.installDate) === 2);
+    !dismissed.has(c.id) &&
+    (c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب') &&
+    daysUntil(c.installDate) === 0);
+  const soon = clients.filter(c => {
+    if (dismissed.has(c.id) || c.stage !== 'فاتورة_صادرة') return false;
+    const d = daysUntil(c.installDate);
+    return d !== null && d >= 1 && d <= 2;
+  });
+  const upcoming = clients.filter(c => {
+    if (dismissed.has(c.id) || c.stage !== 'فاتورة_صادرة') return false;
+    const d = daysUntil(c.installDate);
+    return d !== null && d >= 3 && d <= 7;
+  }).sort((a, b) => new Date(a.installDate) - new Date(b.installDate));
 
-  const row = (bg, bd, inner) =>
-    `<div style="background:${bg};border:0.5px solid ${bd};border-radius:8px;padding:9px 12px;margin-bottom:6px">${inner}</div>`;
-  const sec = (color, icon, title, n) =>
-    `<div style="font-size:12px;font-weight:600;color:${color};padding-bottom:7px;margin-bottom:8px;border-bottom:0.5px solid #2e3244">${icon} ${title} <span style="font-weight:400;color:#666">(${n})</span></div>`;
-  const none = `<div style="font-size:11px;color:#555;padding:2px 0 10px">لا يوجد</div>`;
-  const waBtn = (label, fn) =>
-    `<button onclick="${fn}" style="width:100%;margin-top:7px;background:#25D366;color:#fff;border:none;border-radius:6px;padding:5px 0;font-size:11px;cursor:pointer;font-family:inherit">${label}</button>`;
+  const urgentCount = stale.length + todayInst.length;
+  const followCount = stale.length;
+  const weekCount   = todayInst.length + soon.length + upcoming.length;
+
+  const sub = (c, useRemaining) => {
+    const amt = (useRemaining ? c.remaining : c.offerPrice) || 0;
+    return [amt.toLocaleString() + ' ر.س', c.location].filter(Boolean).join(' — ');
+  };
+
+  const card = (color, bg, name, info, daysLbl, id, btns, doneFn) => `
+    <div style="background:${bg};border-right:3px solid ${color};border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px">
+        <div>
+          <div style="font-size:13px;font-weight:600">${name}</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">${info}</div>
+        </div>
+        <span style="font-size:11px;color:${color};font-weight:700;white-space:nowrap;flex-shrink:0">${daysLbl}</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${btns}
+        <button onclick="${doneFn}" style="flex:1;background:transparent;color:#9a9898;border:0.5px solid #2e3244;border-radius:6px;padding:4px 0;font-size:11px;cursor:pointer;font-family:inherit">✓ تم</button>
+      </div>
+    </div>`;
+
+  const waBtn = (lbl, fn) =>
+    `<button onclick="${fn}" style="flex:2;background:#25D366;color:#fff;border:none;border-radius:6px;padding:4px 0;font-size:11px;cursor:pointer;font-family:inherit">${lbl}</button>`;
+
+  const secHdr = (color, icon, title, n) =>
+    `<div style="font-size:11px;font-weight:700;color:${color};letter-spacing:.3px;padding:10px 0 6px;border-bottom:0.5px solid #2e3244;margin-bottom:8px">${icon} ${title} <span style="opacity:.4;font-weight:400">(${n})</span></div>`;
+
+  const noItems = `<div style="font-size:11px;color:#444;padding:2px 0 10px">لا يوجد</div>`;
 
   el.innerHTML = `
-    ${sec('#E24B4A','⏰','عروض بدون متابعة — أكثر من 3 أيام', stale.length)}
-    ${stale.length ? stale.map(c => row('#1f0e0e','#4a1a1a',`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:13px;font-weight:500">${c.name}</div>
-          <div style="font-size:11px;color:#9a9898">منذ ${daysOld(c.created)} يوم${c.phone?' — '+c.phone:''}</div>
-        </div>
-        <button onclick="contactClient('${c.id}')" style="flex-shrink:0;background:#0d1f0d;color:#5DCAA5;border:0.5px solid #5DCAA5;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit">✓ تم التواصل</button>
-      </div>`)).join('') : none}
-
-    ${sec('#85B7EB','✨','عروض أسعار جديدة اليوم', newToday.length)}
-    ${newToday.length ? newToday.map(c => row('#0a1220','#1a2e4a',`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:13px;font-weight:500">${c.name}</div>
-          <div style="font-size:11px;color:#9a9898">${c.offerPrice.toLocaleString()} ر.س</div>
-        </div>
-        ${c.phone?`<button onclick="waMsg('new','${c.id}')" style="flex-shrink:0;background:#25D366;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:inherit">واتساب</button>`:''}
-      </div>`)).join('') : none}
-
-    ${sec('#5DCAA5','🗓️','تركيبات الأسبوع القادم', upcoming.length)}
-    ${upcoming.length ? upcoming.map(c => { const d = daysUntil(c.installDate); return row('#061a12','#1a4a30',`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:13px;font-weight:500">${c.name}</div>
-          <div style="font-size:11px;color:#9a9898">${c.products||'—'} — ${c.location||'—'}</div>
-        </div>
-        <div style="flex-shrink:0;text-align:left">
-          <div style="font-size:12px;color:#5DCAA5;font-weight:500">${c.installDate}</div>
-          <div style="font-size:11px;color:#FAC775">بعد ${d} يوم</div>
-        </div>
-      </div>`);}).join('') : none}
-
-    ${sec('#FAC775','🔧','تركيبات اليوم', todayInst.length)}
-    ${todayInst.length ? todayInst.map(c => row('#1a1100','#4a3000',`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:13px;font-weight:500">${c.name}</div>
-          <div style="font-size:11px;color:#9a9898">${c.products||'—'} — ${c.location||'—'}</div>
-        </div>
-        <span style="flex-shrink:0;font-size:13px;color:#FAC775;font-weight:600">${(c.remaining||0).toLocaleString()} ر.س</span>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+      <div style="background:#1f0e0e;border:0.5px solid #E24B4A50;border-radius:10px;padding:12px 8px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#E24B4A">${urgentCount}</div>
+        <div style="font-size:10px;color:#9a9898;margin-top:3px">🔴 عاجل</div>
       </div>
-      ${waBtn('📲 إرسال للمحاسب — الدفعة الثانية',"waMsg('acc2','"+c.id+"')")}`)).join('') : none}
-
-    ${sec('#EF9F27','👷','تركيبات بعد يومين — تنبيه عمر', in2days.length)}
-    ${in2days.length ? in2days.map(c => row('#1a0d00','#4a2500',`
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div>
-          <div style="font-size:13px;font-weight:500">${c.name}</div>
-          <div style="font-size:11px;color:#9a9898">${c.products||'—'} — ${c.location||'—'}</div>
-        </div>
-        <div style="flex-shrink:0;font-size:11px;color:#EF9F27">${c.installDate}</div>
+      <div style="background:#0c0f1a;border:0.5px solid #85B7EB50;border-radius:10px;padding:12px 8px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#85B7EB">${followCount}</div>
+        <div style="font-size:10px;color:#9a9898;margin-top:3px">📋 يحتاج متابعة</div>
       </div>
-      ${waBtn('📲 إرسال لعمر',"waMsg('omar','"+c.id+"')")}`)).join('') : none}
+      <div style="background:#061a12;border:0.5px solid #5DCAA550;border-radius:10px;padding:12px 8px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#5DCAA5">${weekCount}</div>
+        <div style="font-size:10px;color:#9a9898;margin-top:3px">🗓️ تركيبات الأسبوع</div>
+      </div>
+    </div>
+
+    ${secHdr('#E24B4A','🔴','عروض بدون متابعة — أكثر من 3 أيام', stale.length)}
+    ${stale.length ? stale.map(c => card(
+      '#E24B4A','#1f0e0e', c.name,
+      sub(c,false), 'منذ '+(daysOld(c.created)||0)+' يوم',
+      c.id,
+      c.phone ? waBtn('واتساب',"waMsg('new','"+c.id+"')") : '',
+      "contactClient('"+c.id+"')"
+    )).join('') : noItems}
+
+    ${secHdr('#E24B4A','🔧','تركيبات اليوم', todayInst.length)}
+    ${todayInst.length ? todayInst.map(c => card(
+      '#E24B4A','#1a1100', c.name,
+      (c.remaining||0).toLocaleString()+' ر.س (دفعة ثانية)'+(c.location?' — '+c.location:''),
+      '🔴 اليوم',
+      c.id,
+      waBtn('📲 إرسال للمحاسب',"waMsg('acc2','"+c.id+"')"),
+      "dismissNotif('"+c.id+"')"
+    )).join('') : noItems}
+
+    ${secHdr('#EF9F27','👷','تركيبات قريبة — تنبيه عمر', soon.length)}
+    ${soon.length ? soon.map(c => { const d=daysUntil(c.installDate); return card(
+      '#EF9F27','#1a0d00', c.name,
+      (c.products||'—')+(c.location?' — '+c.location:''),
+      d===1?'غداً':'بعد يومين',
+      c.id,
+      waBtn('📲 إرسال لعمر',"waMsg('omar','"+c.id+"')"),
+      "dismissNotif('"+c.id+"')"
+    );}).join('') : noItems}
+
+    ${secHdr('#FAC775','🗓️','تركيبات الأسبوع القادم', upcoming.length)}
+    ${upcoming.length ? upcoming.map(c => { const d=daysUntil(c.installDate); return card(
+      d<=4?'#EF9F27':'#FAC775', d<=4?'#1a0d00':'#1a1100',
+      c.name,
+      (c.products||'—')+(c.location?' — '+c.location:''),
+      'بعد '+d+' يوم',
+      c.id, '',
+      "dismissNotif('"+c.id+"')"
+    );}).join('') : noItems}
+
+    ${secHdr('#5DCAA5','✨','عروض أسعار جديدة اليوم', newToday.length)}
+    ${newToday.length ? newToday.map(c => card(
+      '#5DCAA5','#061a12', c.name,
+      sub(c,false), 'جديد اليوم',
+      c.id,
+      c.phone ? waBtn('واتساب',"waMsg('new','"+c.id+"')") : '',
+      "dismissNotif('"+c.id+"')"
+    )).join('') : noItems}
   `;
 }
 
