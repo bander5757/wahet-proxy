@@ -1,4 +1,352 @@
-cd ~/wahet-proxy
-git add .
-git commit -m "Add dashboard"
-git push
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>واحة الخيمة — إدارة العملاء</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1117; color: #e8e6e1; direction: rtl; min-height: 100vh; padding: 1rem; }
+  input, textarea, select { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; font-family: inherit; }
+  button { cursor: pointer; font-family: inherit; border-radius: 8px; font-size: 13px; padding: 7px 14px; transition: opacity 0.2s; }
+  button:hover { opacity: 0.85; }
+  .btn-primary { background: #1a3a5c; color: #85B7EB; border: none; font-weight: 500; }
+  .btn-secondary { background: transparent; color: #e8e6e1; border: 0.5px solid #2e3244; }
+  .btn-green { background: #25D366; color: #fff; border: none; }
+  .btn-sync { background: transparent; color: #5DCAA5; border: 0.5px solid #5DCAA5; }
+  .card { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 12px; padding: 12px; }
+  .section { background: #13161f; border: 0.5px solid #2e3244; border-radius: 12px; padding: 1rem; margin-bottom: 12px; }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 6px; }
+  .text-secondary { color: #9a9898; }
+  .text-success { color: #5DCAA5; }
+  .text-warning { color: #FAC775; }
+  .text-info { color: #85B7EB; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .flex { display: flex; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .gap-8 { gap: 8px; }
+  .gap-6 { gap: 6px; }
+  .mb-8 { margin-bottom: 8px; }
+  .mb-12 { margin-bottom: 12px; }
+  .mt-8 { margin-top: 8px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 99; }
+  .modal { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 1.5rem; width: 440px; max-height: 90vh; overflow-y: auto; direction: rtl; }
+  .row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-bottom: 0.5px solid #2e3244; }
+  .notif { display: flex; gap: 8px; padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; }
+  .kanban-col { min-height: 100px; }
+  .client-card { cursor: pointer; margin-bottom: 8px; }
+  .client-card:hover { border-color: #5DCAA5 !important; }
+  .stat-card { background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; padding: 10px 12px; }
+  #sync-msg { font-size: 12px; color: #9a9898; padding: 8px 12px; background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; margin-bottom: 10px; display: none; }
+  .label { font-size: 11px; color: #9a9898; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+
+<div id="sync-msg"></div>
+
+<!-- Header -->
+<div class="flex-between mb-12">
+  <div>
+    <div style="font-size:16px;font-weight:500">واحة الخيمة — إدارة العملاء</div>
+    <div id="last-sync" style="font-size:11px;color:#9a9898"></div>
+  </div>
+  <div class="flex gap-6">
+    <button class="btn-secondary" onclick="toggleSettings()">⚙️ دفترة</button>
+    <button class="btn-sync" id="sync-btn" onclick="syncDaftra()">🔄 مزامنة</button>
+    <button class="btn-secondary" style="position:relative" onclick="toggleNotif()">
+      🔔 <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center">0</span>
+    </button>
+    <button class="btn-primary" onclick="toggleAdd()">+ يدوي</button>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings-panel" class="section" style="display:none">
+  <div style="font-size:14px;font-weight:500;margin-bottom:12px">⚙️ إعدادات ربط دفترة</div>
+  <div style="background:#0d1a0d;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#5DCAA5">
+    أدخل بيانات دفترة ثم اضغط حفظ
+  </div>
+  <div class="label">رابط Vercel الوسيط</div>
+  <input id="cfg-proxy" type="text" placeholder="https://your-app.vercel.app/api/daftra" style="margin-bottom:10px">
+  <div class="label">Subdomain في دفترة</div>
+  <input id="cfg-subdomain" type="text" placeholder="wkaimah" style="margin-bottom:10px">
+  <div class="label">مفتاح API</div>
+  <input id="cfg-apikey" type="password" placeholder="API Key" style="margin-bottom:12px">
+  <div class="flex gap-8">
+    <button class="btn-primary" onclick="saveConfig()">حفظ والمزامنة</button>
+    <button class="btn-secondary" onclick="toggleSettings()">إلغاء</button>
+  </div>
+</div>
+
+<!-- Notifications -->
+<div id="notif-panel" class="section" style="display:none">
+  <div style="font-size:13px;font-weight:500;margin-bottom:8px">التنبيهات النشطة</div>
+  <div id="notif-list"><div style="font-size:12px;color:#9a9898">لا توجد تنبيهات</div></div>
+</div>
+
+<!-- Add Client -->
+<div id="add-panel" class="section" style="display:none">
+  <div style="font-size:14px;font-weight:500;margin-bottom:10px">إضافة عميل يدوي</div>
+  <div class="grid-2" style="margin-bottom:10px">
+    <div><div class="label">اسم العميل</div><input id="f-name" type="text"></div>
+    <div><div class="label">الجوال</div><input id="f-phone" type="text"></div>
+    <div><div class="label">المنتجات</div><input id="f-products" type="text"></div>
+    <div><div class="label">الموقع</div><input id="f-location" type="text"></div>
+    <div><div class="label">القيمة (ر.س)</div><input id="f-price" type="number"></div>
+    <div><div class="label">تاريخ التركيب</div><input id="f-date" type="date"></div>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn-primary" onclick="addClient()">حفظ</button>
+    <button class="btn-secondary" onclick="toggleAdd()">إلغاء</button>
+  </div>
+</div>
+
+<!-- Kanban -->
+<div class="grid-5" id="kanban"></div>
+
+<!-- Stats -->
+<div class="grid-4" id="stats"></div>
+
+<!-- Modal -->
+<div id="modal" class="modal-overlay" style="display:none" onclick="closeModal()">
+  <div class="modal" onclick="event.stopPropagation()" id="modal-content"></div>
+</div>
+
+<script>
+const STAGES = ['عرض_سعر','موافق','فاتورة_صادرة','تم_التركيب','مكتمل'];
+const LABELS = {'عرض_سعر':'عرض السعر','موافق':'موافق','فاتورة_صادرة':'فاتورة صادرة','تم_التركيب':'تم التركيب','مكتمل':'مكتمل'};
+const COLORS = {'عرض_سعر':'#B5D4F4','موافق':'#FAC775','فاتورة_صادرة':'#C0DD97','تم_التركيب':'#9FE1CB','مكتمل':'#CECBF6'};
+const CTXT  = {'عرض_سعر':'#0C447C','موافق':'#633806','فاتورة_صادرة':'#27500A','تم_التركيب':'#085041','مكتمل':'#3C3489'};
+
+let clients = [];
+let cfg = JSON.parse(localStorage.getItem('wk_cfg') || '{"subdomain":"","apikey":"","proxyUrl":""}');
+let syncTimer = null;
+
+const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
+
+function saveConfig() {
+  cfg = { proxyUrl: document.getElementById('cfg-proxy').value.trim(), subdomain: document.getElementById('cfg-subdomain').value.trim(), apikey: document.getElementById('cfg-apikey').value.trim() };
+  localStorage.setItem('wk_cfg', JSON.stringify(cfg));
+  toggleSettings();
+  syncDaftra();
+}
+
+function loadConfigUI() {
+  document.getElementById('cfg-proxy').value = cfg.proxyUrl || '';
+  document.getElementById('cfg-subdomain').value = cfg.subdomain || '';
+  document.getElementById('cfg-apikey').value = cfg.apikey || '';
+}
+
+async function syncDaftra() {
+  if (!cfg.subdomain || !cfg.apikey || !cfg.proxyUrl) { showMsg('⚠️ أدخل بيانات دفترة أولاً'); return; }
+  showMsg('⏳ جاري المزامنة مع دفترة...');
+  document.getElementById('sync-btn').textContent = '⏳';
+  try {
+    const post = (ep) => fetch(cfg.proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subdomain: cfg.subdomain, apikey: cfg.apikey, endpoint: ep, method: 'GET' })
+    }).then(r => r.json());
+
+    const [estRes, invRes] = await Promise.all([
+      post('estimates.json?limit=100&page=1'),
+      post('invoices.json?limit=100&page=1')
+    ]);
+
+    const estimates = estRes?.data || [];
+    const invoices  = invRes?.data  || [];
+    const manual = clients.filter(c => c.source !== 'daftra');
+    const merged = [...manual];
+
+    estimates.forEach(e => {
+      const est = e.Estimate || e;
+      const hasInv = invoices.some(i => (i.Invoice||i).client_id === est.client_id);
+      if (!hasInv) merged.push({
+        id: 'est_' + est.id, daftraEstId: est.id, daftraClientId: est.client_id,
+        name: est.client_business_name || est.client_first_name || 'عميل',
+        phone: est.client_phone || '', products: '—', location: est.client_state || '',
+        offerPrice: parseFloat(est.summary_total || 0),
+        deposit: Math.round(parseFloat(est.summary_total || 0) / 2),
+        remaining: Math.round(parseFloat(est.summary_total || 0) / 2),
+        stage: 'عرض_سعر', installDate: '', notes: '', assignedTo: '—',
+        created: (est.date||'').slice(0,10), source: 'daftra', daftraNo: est.no
+      });
+    });
+
+    invoices.forEach(inv => {
+      const i = inv.Invoice || inv;
+      const ex = merged.find(c => c.daftraClientId === i.client_id);
+      const card = {
+        ...(ex||{}), id: ex ? ex.id : 'inv_' + i.id,
+        daftraInvId: i.id, daftraClientId: i.client_id,
+        name: i.client_business_name || i.client_first_name || ex?.name || 'عميل',
+        phone: i.client_phone || ex?.phone || '',
+        products: ex?.products || '—', location: i.client_state || ex?.location || '',
+        offerPrice: parseFloat(i.summary_total || 0),
+        deposit: Math.round(parseFloat(i.summary_total||0)/2),
+        remaining: Math.round(parseFloat(i.summary_total||0)/2),
+        stage: ex?.stage === 'تم_التركيب' || ex?.stage === 'مكتمل' ? ex.stage : 'فاتورة_صادرة',
+        installDate: ex?.installDate || '', notes: ex?.notes || '',
+        assignedTo: ex?.assignedTo || '—',
+        created: (i.date||'').slice(0,10), source: 'daftra', daftraNo: i.no
+      };
+      const idx = merged.findIndex(c => c.daftraClientId === card.daftraClientId);
+      if (idx >= 0) merged[idx] = card; else merged.push(card);
+    });
+
+    clients = merged;
+    document.getElementById('last-sync').textContent = 'آخر مزامنة: ' + new Date().toLocaleTimeString('ar-SA');
+    showMsg('✅ تمت المزامنة — ' + estimates.length + ' عرض سعر، ' + invoices.length + ' فاتورة');
+    render();
+  } catch(err) {
+    showMsg('❌ فشل الاتصال: ' + err.message);
+  }
+  document.getElementById('sync-btn').textContent = '🔄 مزامنة';
+}
+
+function addClient() {
+  const p = parseFloat(document.getElementById('f-price').value) || 0;
+  clients.push({
+    id: 'manual_' + Date.now(),
+    name: document.getElementById('f-name').value,
+    phone: document.getElementById('f-phone').value,
+    products: document.getElementById('f-products').value,
+    location: document.getElementById('f-location').value,
+    offerPrice: p, deposit: Math.round(p/2), remaining: Math.round(p/2),
+    stage: 'عرض_سعر', installDate: document.getElementById('f-date').value,
+    notes: '', assignedTo: 'بندر', source: 'manual',
+    created: new Date().toISOString().slice(0,10)
+  });
+  toggleAdd(); render();
+}
+
+function advance(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  const idx = STAGES.indexOf(c.stage);
+  if (idx < STAGES.length - 1) c.stage = STAGES[idx + 1];
+  closeModal(); render();
+}
+
+function showModal(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+  const days = daysUntil(c.installDate);
+  const nextStage = STAGES[STAGES.indexOf(c.stage)+1];
+  document.getElementById('modal-content').innerHTML = `
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:500">${c.name}</div>
+        ${c.daftraNo ? '<div style="font-size:11px;color:#5DCAA5">دفترة #'+c.daftraNo+'</div>' : ''}
+      </div>
+      <span class="badge" style="background:${COLORS[c.stage]};color:${CTXT[c.stage]}">${LABELS[c.stage]}</span>
+    </div>
+    ${[['الجوال',c.phone],['المنتجات',c.products],['الموقع',c.location],['المسؤول',c.assignedTo],['تاريخ التركيب',c.installDate||'لم يحدد'],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
+    <div style="background:#13161f;border-radius:8px;padding:10px 12px;margin:12px 0">
+      ${[['الإجمالي',c.offerPrice.toLocaleString()+' ر.س'],['دفعة أولى',c.deposit.toLocaleString()+' ر.س'],['دفعة ثانية',c.remaining.toLocaleString()+' ر.س']].map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:3px 0"><span class="text-secondary">${k}</span><span class="text-success" style="font-weight:500">${v}</span></div>`).join('')}
+    </div>
+    <div class="flex gap-8" style="flex-wrap:wrap">
+      ${nextStage ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
+      ${c.phone ? `<button class="btn-green" style="flex:1" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name} 👋\\nتواصل معك فريق واحة الخيمة 🏕️'))">واتساب</button>` : ''}
+      <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>
+    </div>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+function render() {
+  // كانبان
+  const kanban = document.getElementById('kanban');
+  kanban.innerHTML = STAGES.map(s => {
+    const cols = clients.filter(c => c.stage === s);
+    return `<div>
+      <div class="flex-between mb-8">
+        <span style="font-size:12px;font-weight:500;color:${CTXT[s]}">${LABELS[s]}</span>
+        <span class="badge" style="background:${COLORS[s]};color:${CTXT[s]}">${cols.length}</span>
+      </div>
+      <div class="kanban-col" style="background:#13161f;border:0.5px solid #2e3244;border-radius:10px;padding:8px">
+        ${cols.map(c => {
+          const d = daysUntil(c.installDate);
+          const urgent = d !== null && d <= 2 && d >= 0;
+          return `<div class="card client-card" style="border-color:${urgent?'#EF9F27':'#2e3244'}" onclick="showModal('${c.id}')">
+            <div class="flex-between mb-8">
+              <span style="font-size:13px;font-weight:500">${c.name}</span>
+              <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${c.source==='daftra'?'#1a2e1a':'#1a1a2e'};color:${c.source==='daftra'?'#5DCAA5':'#85B7EB'}">${c.source==='daftra'?'دفترة':'يدوي'}</span>
+            </div>
+            ${c.daftraNo?`<div style="font-size:11px;color:#5DCAA5;margin-bottom:3px">#${c.daftraNo}</div>`:''}
+            <div class="flex-between">
+              <span style="font-size:13px;font-weight:500;color:#5DCAA5">${c.offerPrice.toLocaleString()} ر.س</span>
+              ${urgent?`<span style="font-size:11px;color:#FAC775">بعد ${d} يوم</span>`:''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  // تنبيهات
+  const notifs = clients.flatMap(c => {
+    const a = [];
+    if (c.stage === 'عرض_سعر') a.push({type:'warning',text:'متابعة موافقة العميل: '+c.name,phone:c.phone});
+    if (c.stage === 'فاتورة_صادرة') a.push({type:'info',text:'تنبيه المحاسب: الدفعة الأولى — '+c.name+' ('+c.deposit.toLocaleString()+' ر.س)',phone:c.phone});
+    const d = daysUntil(c.installDate);
+    if (c.stage === 'فاتورة_صادرة' && d !== null && d <= 2 && d >= 0)
+      a.push({type:'success',text:'تنبيه عمر: تركيب '+c.name+' بعد '+d+' يوم — '+c.location,phone:c.phone});
+    return a;
+  });
+  const nb = document.getElementById('notif-badge');
+  nb.style.display = notifs.length ? 'flex' : 'none';
+  nb.textContent = notifs.length;
+  const nbg = {warning:'#2a1f00',info:'#001a2e',success:'#001a0e'};
+  const ntx = {warning:'#FAC775',info:'#85B7EB',success:'#5DCAA5'};
+  document.getElementById('notif-list').innerHTML = notifs.length ? notifs.map(n =>
+    `<div class="notif" style="background:${nbg[n.type]}">
+      <span>${n.type==='warning'?'⚠️':n.type==='info'?'💰':'🔧'}</span>
+      <div style="flex:1">
+        <div style="font-size:12px;color:${ntx[n.type]}">${n.text}</div>
+        ${n.phone?`<button class="btn-green" style="margin-top:4px;font-size:11px;padding:2px 8px" onclick="window.open('https://wa.me/${n.phone}?text='+encodeURIComponent('تذكير 🏕️'))">واتساب</button>`:''}
+      </div>
+    </div>`).join('') : '<div style="font-size:12px;color:#9a9898">لا توجد تنبيهات</div>';
+
+  // إحصاءات
+  document.getElementById('stats').innerHTML = [
+    ['العملاء', clients.length, ''],
+    ['إجمالي العقود', clients.reduce((s,c)=>s+c.offerPrice,0).toLocaleString()+' ر.س', ''],
+    ['من دفترة', clients.filter(c=>c.source==='daftra').length, 'success'],
+    ['انتظار موافقة', clients.filter(c=>c.stage==='عرض_سعر').length, 'warning'],
+  ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:500;color:${t==='warning'?'#FAC775':t==='success'?'#5DCAA5':'#e8e6e1'}">${v}</div></div>`).join('');
+}
+
+function showMsg(t) {
+  const el = document.getElementById('sync-msg');
+  el.textContent = t; el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}
+
+function toggleSettings() {
+  const p = document.getElementById('settings-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') loadConfigUI();
+}
+function toggleNotif() {
+  const p = document.getElementById('notif-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+function toggleAdd() {
+  const p = document.getElementById('add-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+// تحميل أولي
+render();
+if (cfg.subdomain && cfg.apikey && cfg.proxyUrl) {
+  syncDaftra();
+  syncTimer = setInterval(syncDaftra, 60000);
+}
+</script>
+</body>
+</html>

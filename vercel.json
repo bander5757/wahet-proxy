@@ -1,11 +1,13 @@
 {
   "version": 2,
-  "functions": {
-    "api/daftra.js": {
-      "memory": 128,
-      "maxDuration": 10
-    }
-  },
+  "builds": [
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "api/daftra.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/daftra", "dest": "/api/daftra.js" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",
