@@ -327,7 +327,7 @@ function renderDashboard() {
   const dd = document.getElementById('daily-date');
   if (dd) dd.textContent = new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
 
-  const stale    = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && (daysOld(c.created)||0) > 3);
+  const stale    = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && c.created >= today && (daysOld(c.created)||0) > 3);
   const newToday = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && c.created === today);
   const todayInst = clients.filter(c =>
     !dismissed.has(c.id) &&
