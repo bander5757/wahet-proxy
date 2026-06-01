@@ -2,8 +2,8 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#0f1117">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f6f8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="واحة الخيمة">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -12,6 +12,7 @@
 <title>واحة الخيمة — لوحة المؤسسة</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1117; color: #e8e6e1; direction: rtl; min-height: 100vh; padding: 1rem; padding-bottom: 88px; }
   body.light-mode { background: #f4f6f8; color: #17202a; }
   input, textarea, select { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; font-family: inherit; }
@@ -86,6 +87,17 @@
   body.light-mode .bottom-nav button { color: #637083; }
   body.light-mode .bottom-nav button.active { background: #e4f0fb; color: #175d9a; }
   .quick-fab { position: fixed; left: 16px; bottom: 18px; z-index: 80; min-width: 112px; box-shadow: 0 10px 28px rgba(0,0,0,.32); }
+  .mobile-menu-btn { display: none; }
+  .side-menu-overlay { position: fixed; inset: 0; background: rgba(15,17,23,.55); z-index: 95; display: none; }
+  .side-menu-overlay.open { display: block; }
+  .side-menu { position: fixed; top: 0; bottom: 0; right: 0; z-index: 96; width: min(320px, 86vw); background: #13161f; border-left: 0.5px solid #2e3244; padding: max(16px, env(safe-area-inset-top)) 14px 18px; transform: translateX(105%); transition: transform .22s ease; overflow-y: auto; box-shadow: -18px 0 38px rgba(0,0,0,.28); }
+  .side-menu.open { transform: translateX(0); }
+  .side-nav { display: grid; gap: 7px; margin-top: 14px; }
+  .side-nav button { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; background: transparent; color: #e8e6e1; border: 0.5px solid #2e3244; padding: 11px 12px; text-align: right; }
+  .side-nav button.active { background: #1a3a5c; color: #85B7EB; border-color: #2c5f91; }
+  body.light-mode .side-menu { background: #fff; border-left-color: #d8e0e7; }
+  body.light-mode .side-nav button { color: #17202a; border-color: #d8e0e7; }
+  body.light-mode .side-nav button.active { background: #e4f0fb; color: #175d9a; border-color: #9dc4e9; }
   .login-screen { position: fixed; inset: 0; z-index: 120; background: #0f1117; display: none; align-items: center; justify-content: center; padding: 18px; }
   body.light-mode .login-screen { background: #f4f6f8; }
   .login-card { width: 420px; max-width: 100%; background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 22px; }
@@ -95,20 +107,27 @@
   .daily-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .daily-card-actions button { flex: 1 1 95px; }
   @media (max-width: 900px) {
-    body { padding: 12px; padding-bottom: 96px; }
-    .app-header { align-items: flex-start; }
-    .header-actions button { padding: 7px 10px; }
+    body { width: 100%; overflow-x: hidden; padding: 10px; padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: 82px; }
+    .app-header { align-items: flex-start; gap: 8px; }
+    .app-header > div:first-child { min-width: 0; }
+    .app-header > div:first-child > div:first-child { font-size: 15px; line-height: 1.35; }
+    .header-actions { margin-right: auto; gap: 5px; }
+    .header-actions button { padding: 7px 9px; }
+    .desktop-nav { display: none; }
+    .mobile-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 36px; padding: 0; font-size: 19px; }
+    .header-actions [data-mobile-hide="true"] { display: none !important; }
     .grid-5, .grid-4, .dashboard-grid, .kpi-grid, .client-overview-grid, .tender-toolbox { grid-template-columns: 1fr; }
     .grid-2, .quick-grid { grid-template-columns: 1fr; }
     .modal { width: min(440px, calc(100vw - 24px)); padding: 1rem; }
     .daily-grid { grid-template-columns: 1fr; }
     .daily-card { padding: 12px; }
     .tabs { display: none; }
-    .bottom-nav { position: fixed; right: 0; left: 0; bottom: 0; z-index: 70; display: flex; gap: 4px; overflow-x: auto; background: #13161f; border-top: 0.5px solid #2e3244; padding: 7px 6px 8px; scrollbar-width: none; }
-    .bottom-nav::-webkit-scrollbar { display: none; }
-    .bottom-nav button { flex: 0 0 72px; border: none; background: transparent; color: #9a9898; padding: 5px 2px; font-size: 11px; border-radius: 8px; }
-    .bottom-nav button.active { background: #1a3a5c; color: #85B7EB; }
-    .quick-fab { left: 12px; bottom: 76px; }
+    .bottom-nav { display: none; }
+    .quick-fab { left: 12px; bottom: max(14px, env(safe-area-inset-bottom)); min-width: 104px; }
+    .section { padding: 12px; border-radius: 10px; }
+    .stat-card { padding: 10px; }
+    .list-row { flex-direction: column; gap: 8px; }
+    .list-row > div:last-child { justify-content: flex-start !important; }
   }
 </style>
 </head>
@@ -151,18 +170,19 @@
     <div id="user-status" style="font-size:11px;color:#85B7EB;margin-top:2px"></div>
   </div>
   <div class="flex gap-6 header-actions">
-    <button class="btn-secondary" onclick="showDailyPanel()">📋 متابعة</button>
+    <button class="btn-secondary mobile-menu-btn" onclick="toggleSideMenu()">☰</button>
+    <button class="btn-secondary" data-mobile-hide="true" onclick="showDailyPanel()">📋 متابعة</button>
     <button class="btn-secondary" onclick="openLogin()">👤 دخول</button>
     <button class="btn-secondary" id="theme-btn" onclick="toggleTheme()">☀️ عادي</button>
-    <button class="btn-secondary" style="position:relative" onclick="toggleNotif()">
+    <button class="btn-secondary" data-mobile-hide="true" style="position:relative" onclick="toggleNotif()">
       🔔 <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center">0</span>
     </button>
     <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
-    <button class="btn-primary" data-action="addClient" onclick="toggleAdd()">+ يدوي</button>
+    <button class="btn-primary" data-action="addClient" data-mobile-hide="true" onclick="toggleAdd()">+ يدوي</button>
   </div>
 </div>
 
-<div class="tabs" id="tabs">
+<div class="tabs desktop-nav" id="tabs">
   <button class="tab-btn active" onclick="setTab('home')">الرئيسية</button>
   <button class="tab-btn" onclick="setTab('daily')">المتابعة</button>
   <button class="tab-btn" onclick="setTab('clients')">العملاء</button>
@@ -172,6 +192,27 @@
   <button class="tab-btn" onclick="setTab('tenders')">المنافسات</button>
   <button class="tab-btn" onclick="setTab('reports')">التقارير</button>
 </div>
+
+<div class="side-menu-overlay" id="side-menu-overlay" onclick="closeSideMenu()"></div>
+<aside class="side-menu" id="side-menu">
+  <div class="flex-between">
+    <div>
+      <div style="font-size:15px;font-weight:700">واحة الخيمة</div>
+      <div class="text-secondary" style="font-size:11px;margin-top:2px">القائمة الرئيسية</div>
+    </div>
+    <button class="btn-secondary" onclick="closeSideMenu()">إغلاق</button>
+  </div>
+  <div class="side-nav" id="side-nav">
+    <button class="active" onclick="setTab('home')"><span>🏠</span><span>الرئيسية</span></button>
+    <button onclick="setTab('daily')"><span>📋</span><span>المتابعة</span></button>
+    <button onclick="setTab('clients')"><span>👥</span><span>العملاء</span></button>
+    <button onclick="setTab('finance')"><span>💰</span><span>المحاسبة</span></button>
+    <button onclick="setTab('ops')"><span>🔧</span><span>التركيبات</span></button>
+    <button onclick="setTab('assets')"><span>🔔</span><span>الموظفين والسيارات</span></button>
+    <button onclick="setTab('tenders')"><span>🎯</span><span>المنافسات</span></button>
+    <button onclick="setTab('reports')"><span>📊</span><span>التقارير</span></button>
+  </div>
+</aside>
 
 <!-- Notifications -->
 <div id="notif-panel" class="section" style="display:none">
@@ -515,8 +556,8 @@ let vehicles = [];
 try { vehicles = JSON.parse(localStorage.getItem('wk_vehicles') || '[]'); } catch(e) { vehicles = []; }
 let generalAlerts = [];
 try { generalAlerts = JSON.parse(localStorage.getItem('wk_general_alerts') || '[]'); } catch(e) { generalAlerts = []; }
-let theme = 'dark';
-try { theme = localStorage.getItem('wk_theme') || 'dark'; } catch(e) {}
+let theme = 'light';
+try { theme = localStorage.getItem('wk_theme') || 'light'; } catch(e) {}
 let currentUser = null;
 let authToken = '';
 try { currentUser = JSON.parse(localStorage.getItem('wk_current_user') || 'null'); } catch(e) { currentUser = null; }
@@ -565,6 +606,14 @@ function toggleTheme() {
   theme = theme === 'light' ? 'dark' : 'light';
   try { localStorage.setItem('wk_theme', theme); } catch(e) {}
   applyTheme();
+}
+function toggleSideMenu() {
+  document.getElementById('side-menu')?.classList.toggle('open');
+  document.getElementById('side-menu-overlay')?.classList.toggle('open');
+}
+function closeSideMenu() {
+  document.getElementById('side-menu')?.classList.remove('open');
+  document.getElementById('side-menu-overlay')?.classList.remove('open');
 }
 const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب' || c.stage === 'مكتمل');
 const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
@@ -1273,6 +1322,8 @@ function setTab(tab) {
   if (page) page.classList.add('active');
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
+  document.querySelectorAll('#side-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
+  closeSideMenu();
   if (tab !== 'clients') {
     const settingsPanel = document.getElementById('settings-panel');
     if (settingsPanel) settingsPanel.style.display = 'none';

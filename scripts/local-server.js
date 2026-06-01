@@ -85,6 +85,7 @@ async function routeApi(req, res, url) {
 }
 
 function serveStatic(res, url) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   const requested = url.pathname === "/" ? "/index.html" : url.pathname;
   const fullPath = path.join(process.cwd(), requested);
   if (!fullPath.startsWith(process.cwd()) || !fs.existsSync(fullPath) || fs.statSync(fullPath).isDirectory()) {
