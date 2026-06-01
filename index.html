@@ -907,6 +907,14 @@ const saveClientState = c => {
 };
 const normalizedCfg = next => Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra' }, next || {});
 const hasConfig = () => Boolean(cfg.subdomain && cfg.apikey);
+function resolveDaftraProxyUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '/api/daftra';
+  if (value.endsWith('/api/daftra')) return value;
+  if (value.endsWith('/api/daftra/')) return value.slice(0, -1);
+  if (value.startsWith('/') && value !== '/') return value;
+  return value.replace(/\/+$/, '') + '/api/daftra';
+}
 const setConfigSaveStatus = msg => {
   const el = document.getElementById('cfg-save-status');
   if (el) el.textContent = msg || '';
@@ -939,6 +947,7 @@ const idbSet = async (key, value) => {
 };
 async function savePersistedConfig(nextCfg) {
   nextCfg = normalizedCfg(nextCfg);
+  nextCfg.proxyUrl = resolveDaftraProxyUrl(nextCfg.proxyUrl);
   const savedIn = [];
   try {
     localStorage.setItem('wk_cfg_v2', JSON.stringify(nextCfg));
@@ -986,7 +995,7 @@ async function saveConfig() {
   const apikey = document.getElementById('cfg-apikey').value.trim() || cfg.apikey;
   if (!subdomain) { alert('الحقل المطلوب: Subdomain'); return; }
   if (!apikey)    { alert('الحقل المطلوب: مفتاح API'); return; }
-  cfg = { proxyUrl, subdomain, apikey };
+  cfg = { proxyUrl: resolveDaftraProxyUrl(proxyUrl), subdomain, apikey };
   const saved = await savePersistedConfig(cfg);
   toggleSettings();
   showMsg((saved ? '✅ تم حفظ الإعدادات' : '⚠️ الإعدادات مؤقتة') + ' — Subdomain: ' + subdomain);
@@ -1025,7 +1034,7 @@ function sendAccWa(key) {
 }
 
 function loadConfigUI() {
-  document.getElementById('cfg-proxy').value = cfg.proxyUrl || '/api/daftra';
+  document.getElementById('cfg-proxy').value = resolveDaftraProxyUrl(cfg.proxyUrl);
   document.getElementById('cfg-subdomain').value = cfg.subdomain || '';
   document.getElementById('cfg-apikey').value = cfg.apikey || '';
   setConfigSaveStatus(hasConfig() ? 'إعدادات دفترة محفوظة، لن تحتاج إدخالها كل مرة' : '');
@@ -1034,7 +1043,7 @@ function loadConfigUI() {
 async function syncDaftra() {
   if (activeTab !== 'clients') { showMsg('⚠️ مزامنة دفترة من تبويب العملاء فقط'); return; }
   if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ أدخل Subdomain ومفتاح دفترة أولاً'); return; }
-  const proxyUrl = cfg.proxyUrl || '/api/daftra';
+  const proxyUrl = resolveDaftraProxyUrl(cfg.proxyUrl);
   showMsg('⏳ جاري المزامنة مع دفترة...');
   document.getElementById('sync-btn').textContent = '⏳';
   try {
@@ -1046,6 +1055,7 @@ async function syncDaftra() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || data.message || ('فشل طلب دفترة: ' + ep));
+      if (!data.data && !Array.isArray(data)) throw new Error('رابط الوسيط لا يرجع بيانات دفترة. استخدم /api/daftra');
       return data;
     };
 
