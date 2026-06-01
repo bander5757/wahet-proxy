@@ -11,10 +11,10 @@ on conflict (email) do update set
   role = excluded.role,
   is_active = true;
 
-update app_users set login_code_hash = encode(digest('1111', 'sha256'), 'hex') where email = 'bander@wkaimah.local';
-update app_users set login_code_hash = encode(digest('2222', 'sha256'), 'hex') where email = 'abufayez@wkaimah.local';
-update app_users set login_code_hash = encode(digest('3333', 'sha256'), 'hex') where email = 'omar@wkaimah.local';
-update app_users set login_code_hash = encode(digest('4444', 'sha256'), 'hex') where email = 'saddam@wkaimah.local';
+update app_users set login_code_hash = '0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c' where email = 'bander@wkaimah.local';
+update app_users set login_code_hash = '33599abb8b3cf71d25659d1df20462851f93415a894b0ae26ba2bde49db1a15c' where email = 'abufayez@wkaimah.local';
+update app_users set login_code_hash = '60c5ac75e66f66eef9fe80e25804729d8cc8f49f61c7be5d677a0da8c2601cb3' where email = 'omar@wkaimah.local';
+update app_users set login_code_hash = 'ca9e04fac83c99627e18a962f979b498572c8d358b4789e4b0623367d27629f6' where email = 'saddam@wkaimah.local';
 
 insert into bank_accounts (name, account_type)
 values
