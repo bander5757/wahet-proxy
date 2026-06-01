@@ -13,22 +13,27 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1117; color: #e8e6e1; direction: rtl; min-height: 100vh; padding: 1rem; padding-bottom: 88px; }
-  body.light-mode { background: #f4f6f8; color: #17202a; }
-  input, textarea, select { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; font-family: inherit; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f4f6f8; color: #17202a; direction: rtl; min-height: 100vh; padding: 1rem; padding-bottom: 88px; }
+  body:not(.light-mode) { background: #0f1117; color: #e8e6e1; }
+  input, textarea, select { background: #fff; color: #17202a; border: 0.5px solid #cfd7df; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; font-family: inherit; }
+  body:not(.light-mode) input, body:not(.light-mode) textarea, body:not(.light-mode) select { background: #1a1d2b; color: #e8e6e1; border-color: #2e3244; }
   body.light-mode input, body.light-mode textarea, body.light-mode select { background: #fff; color: #17202a; border-color: #cfd7df; }
   button { cursor: pointer; font-family: inherit; border-radius: 8px; font-size: 13px; padding: 7px 14px; transition: opacity 0.2s; }
   button:hover { opacity: 0.85; }
   .btn-primary { background: #1a3a5c; color: #85B7EB; border: none; font-weight: 500; }
-  .btn-secondary { background: transparent; color: #e8e6e1; border: 0.5px solid #2e3244; }
+  .btn-secondary { background: #fff; color: #17202a; border: 0.5px solid #cfd7df; }
+  body:not(.light-mode) .btn-secondary { background: transparent; color: #e8e6e1; border-color: #2e3244; }
   body.light-mode .btn-secondary { color: #17202a; border-color: #cfd7df; background: #fff; }
   .btn-green { background: #25D366; color: #fff; border: none; }
   .btn-sync { background: transparent; color: #5DCAA5; border: 0.5px solid #5DCAA5; }
-  .card { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 12px; padding: 12px; }
-  .section { background: #13161f; border: 0.5px solid #2e3244; border-radius: 12px; padding: 1rem; margin-bottom: 12px; }
+  .card { background: #fff; border: 0.5px solid #d8e0e7; border-radius: 12px; padding: 12px; }
+  .section { background: #fff; border: 0.5px solid #d8e0e7; border-radius: 12px; padding: 1rem; margin-bottom: 12px; }
+  body:not(.light-mode) .card { background: #1a1d2b; border-color: #2e3244; }
+  body:not(.light-mode) .section { background: #13161f; border-color: #2e3244; }
   body.light-mode .card, body.light-mode .section, body.light-mode .stat-card, body.light-mode .tab-btn { background: #fff; border-color: #d8e0e7; }
   .badge { font-size: 10px; padding: 2px 7px; border-radius: 6px; }
-  .text-secondary { color: #9a9898; }
+  .text-secondary { color: #637083; }
+  body:not(.light-mode) .text-secondary { color: #9a9898; }
   body.light-mode .text-secondary, body.light-mode .label { color: #637083; }
   .text-success { color: #5DCAA5; }
   .text-warning { color: #FAC775; }
@@ -44,7 +49,8 @@
   .mb-12 { margin-bottom: 12px; }
   .mt-8 { margin-top: 8px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 99; }
-  .modal { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 1.5rem; width: 440px; max-height: 90vh; overflow-y: auto; direction: rtl; }
+  .modal { background: #fff; border: 0.5px solid #d8e0e7; border-radius: 16px; padding: 1.5rem; width: 440px; max-height: 90vh; overflow-y: auto; direction: rtl; }
+  body:not(.light-mode) .modal { background: #1a1d2b; border-color: #2e3244; }
   body.light-mode .modal { background: #fff; border-color: #d8e0e7; }
   .row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-bottom: 0.5px solid #2e3244; }
   body.light-mode .row, body.light-mode .list-row { border-bottom-color: #d8e0e7; }
@@ -53,25 +59,31 @@
   .client-card { cursor: pointer; margin-bottom: 8px; }
   .client-card:hover { border-color: #5DCAA5 !important; }
   .client-overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-  .followup-card { border-color: #E24B4A; background: #241113; }
-  .month-group { border: 0.5px solid #2e3244; border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
-  .month-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: #1a1d2b; border-bottom: 0.5px solid #2e3244; }
+  .followup-card { border-color: #e78888; background: #fff3f3; }
+  body:not(.light-mode) .followup-card { border-color: #E24B4A; background: #241113; }
+  .month-group { border: 0.5px solid #d8e0e7; border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+  .month-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: #f4f6f8; border-bottom: 0.5px solid #d8e0e7; }
   .tender-toolbox { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 12px; margin-bottom: 12px; }
   .tender-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .tender-chip { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 9px; font-size: 12px; }
+  .tender-chip { background: #fff; color: #17202a; border: 0.5px solid #d8e0e7; border-radius: 8px; padding: 6px 9px; font-size: 12px; }
+  body:not(.light-mode) .tender-chip { background: #1a1d2b; color: #e8e6e1; border-color: #2e3244; }
   body.light-mode .month-group { border-color: #d8e0e7; }
   body.light-mode .month-head { background: #f4f6f8; border-bottom-color: #d8e0e7; }
   body.light-mode .followup-card { background: #fff3f3; border-color: #e78888; }
   body.light-mode .tender-chip { background: #fff; color: #17202a; border-color: #d8e0e7; }
-  .stat-card { background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; padding: 10px 12px; }
-  #sync-msg { font-size: 12px; color: #9a9898; padding: 8px 12px; background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; margin-bottom: 10px; display: none; }
+  .stat-card { background: #fff; border: 0.5px solid #d8e0e7; border-radius: 8px; padding: 10px 12px; }
+  body:not(.light-mode) .stat-card { background: #13161f; border-color: #2e3244; }
+  #sync-msg { font-size: 12px; color: #637083; padding: 8px 12px; background: #fff; border: 0.5px solid #d8e0e7; border-radius: 8px; margin-bottom: 10px; display: none; }
+  body:not(.light-mode) #sync-msg { color: #9a9898; background: #13161f; border-color: #2e3244; }
   body.light-mode #sync-msg { background: #fff; color: #637083; border-color: #d8e0e7; }
-  .label { font-size: 11px; color: #9a9898; margin-bottom: 3px; }
+  .label { font-size: 11px; color: #637083; margin-bottom: 3px; }
+  body:not(.light-mode) .label { color: #9a9898; }
   .app-header { gap: 12px; }
   .header-actions { flex-wrap: wrap; justify-content: flex-end; }
   .tabs { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 12px; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tab-btn { flex: 0 0 auto; background: #13161f; color: #9a9898; border: 0.5px solid #2e3244; white-space: nowrap; }
+  .tab-btn { flex: 0 0 auto; background: #fff; color: #637083; border: 0.5px solid #d8e0e7; white-space: nowrap; }
+  body:not(.light-mode) .tab-btn { background: #13161f; color: #9a9898; border-color: #2e3244; }
   .tab-btn.active { background: #1a3a5c; color: #85B7EB; border-color: #2c5f91; }
   body.light-mode .tab-btn { color: #637083; }
   body.light-mode .tab-btn.active { background: #e4f0fb; color: #175d9a; border-color: #9dc4e9; }
@@ -90,17 +102,21 @@
   .mobile-menu-btn { display: none; }
   .side-menu-overlay { position: fixed; inset: 0; background: rgba(15,17,23,.55); z-index: 95; display: none; }
   .side-menu-overlay.open { display: block; }
-  .side-menu { position: fixed; top: 0; bottom: 0; right: 0; z-index: 96; width: min(320px, 86vw); background: #13161f; border-left: 0.5px solid #2e3244; padding: max(16px, env(safe-area-inset-top)) 14px 18px; transform: translateX(105%); transition: transform .22s ease; overflow-y: auto; box-shadow: -18px 0 38px rgba(0,0,0,.28); }
+  .side-menu { position: fixed; top: 0; bottom: 0; right: 0; z-index: 96; width: min(320px, 86vw); background: #fff; border-left: 0.5px solid #d8e0e7; padding: max(16px, env(safe-area-inset-top)) 14px 18px; transform: translateX(105%); transition: transform .22s ease; overflow-y: auto; box-shadow: -18px 0 38px rgba(0,0,0,.18); }
+  body:not(.light-mode) .side-menu { background: #13161f; border-left-color: #2e3244; box-shadow: -18px 0 38px rgba(0,0,0,.28); }
   .side-menu.open { transform: translateX(0); }
   .side-nav { display: grid; gap: 7px; margin-top: 14px; }
-  .side-nav button { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; background: transparent; color: #e8e6e1; border: 0.5px solid #2e3244; padding: 11px 12px; text-align: right; }
+  .side-nav button { width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px; background: #fff; color: #17202a; border: 0.5px solid #d8e0e7; padding: 11px 12px; text-align: right; }
+  body:not(.light-mode) .side-nav button { background: transparent; color: #e8e6e1; border-color: #2e3244; }
   .side-nav button.active { background: #1a3a5c; color: #85B7EB; border-color: #2c5f91; }
   body.light-mode .side-menu { background: #fff; border-left-color: #d8e0e7; }
   body.light-mode .side-nav button { color: #17202a; border-color: #d8e0e7; }
   body.light-mode .side-nav button.active { background: #e4f0fb; color: #175d9a; border-color: #9dc4e9; }
-  .login-screen { position: fixed; inset: 0; z-index: 120; background: #0f1117; display: none; align-items: center; justify-content: center; padding: 18px; }
+  .login-screen { position: fixed; inset: 0; z-index: 120; background: #f4f6f8; display: none; align-items: center; justify-content: center; padding: 18px; }
+  body:not(.light-mode) .login-screen { background: #0f1117; }
   body.light-mode .login-screen { background: #f4f6f8; }
-  .login-card { width: 420px; max-width: 100%; background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 22px; }
+  .login-card { width: 420px; max-width: 100%; background: #fff; border: 0.5px solid #d8e0e7; border-radius: 16px; padding: 22px; }
+  body:not(.light-mode) .login-card { background: #1a1d2b; border-color: #2e3244; }
   body.light-mode .login-card { background: #fff; border-color: #d8e0e7; }
   .daily-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
   .daily-card { border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
@@ -288,6 +304,9 @@
         <button class="btn-secondary" data-action="settings" onclick="toggleSettings()">⚙️ إعدادات دفترة</button>
         <button class="btn-sync" data-action="sync" id="sync-btn" onclick="syncDaftra()">🔄 مزامنة دفترة</button>
       </div>
+    </div>
+    <div class="text-secondary" style="font-size:11px;line-height:1.7">
+      بعد حفظ إعدادات دفترة من حساب بندر، تبقى محفوظة في قاعدة البيانات وتعمل مزامنة تلقائية كل 10 دقائق عند فتح النظام.
     </div>
   </div>
   <div class="client-overview-grid">
@@ -542,7 +561,7 @@ let clientState = {};
 try { clientState = JSON.parse(localStorage.getItem('wk_client_state') || '{}'); } catch(e) { clientState = {}; }
 let cfg = {};
 try { cfg = JSON.parse(localStorage.getItem('wk_cfg_v2') || localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
-cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, cfg);
+cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra' }, cfg);
 let syncTimer = null;
 const omarWaMsgs = {};
 const accWaMsgs  = {};
@@ -668,8 +687,8 @@ async function loadAppData() {
       dbStatus.textContent = 'قاعدة البيانات متصلة';
       dbStatus.style.color = '#5DCAA5';
     }
-    if (data.settings?.daftra?.subdomain && data.settings?.daftra?.apikey && data.settings?.daftra?.proxyUrl) {
-      cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, data.settings.daftra);
+    if (data.settings?.daftra?.subdomain && data.settings?.daftra?.apikey) {
+      cfg = normalizedCfg(data.settings.daftra);
       try {
         localStorage.setItem('wk_cfg_v2', JSON.stringify(cfg));
         localStorage.setItem('wk_cfg', JSON.stringify(cfg));
@@ -886,7 +905,8 @@ const saveClientState = c => {
     }) }).catch(() => showMsg('⚠️ تم حفظ حالة العرض محلياً وتعذر حفظها في قاعدة البيانات'));
   }
 };
-const hasConfig = () => Boolean(cfg.subdomain && cfg.apikey && cfg.proxyUrl);
+const normalizedCfg = next => Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra' }, next || {});
+const hasConfig = () => Boolean(cfg.subdomain && cfg.apikey);
 const setConfigSaveStatus = msg => {
   const el = document.getElementById('cfg-save-status');
   if (el) el.textContent = msg || '';
@@ -918,6 +938,7 @@ const idbSet = async (key, value) => {
   });
 };
 async function savePersistedConfig(nextCfg) {
+  nextCfg = normalizedCfg(nextCfg);
   const savedIn = [];
   try {
     localStorage.setItem('wk_cfg_v2', JSON.stringify(nextCfg));
@@ -943,8 +964,8 @@ async function hydrateConfig() {
   if (hasConfig()) return;
   try {
     const saved = await idbGet('daftra_config');
-    if (saved?.subdomain && saved?.apikey && saved?.proxyUrl) {
-      cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, saved);
+    if (saved?.subdomain && saved?.apikey) {
+      cfg = normalizedCfg(saved);
       try {
         localStorage.setItem('wk_cfg_v2', JSON.stringify(cfg));
         localStorage.setItem('wk_cfg', JSON.stringify(cfg));
@@ -960,10 +981,9 @@ async function saveConfig() {
     alert('إعدادات دفترة متاحة لحساب بندر فقط');
     return;
   }
-  const proxyUrl = document.getElementById('cfg-proxy').value.trim();
+  const proxyUrl = document.getElementById('cfg-proxy').value.trim() || '/api/daftra';
   const subdomain = document.getElementById('cfg-subdomain').value.trim();
   const apikey = document.getElementById('cfg-apikey').value.trim() || cfg.apikey;
-  if (!proxyUrl) { alert('الحقل المطلوب: رابط Vercel الوسيط'); return; }
   if (!subdomain) { alert('الحقل المطلوب: Subdomain'); return; }
   if (!apikey)    { alert('الحقل المطلوب: مفتاح API'); return; }
   cfg = { proxyUrl, subdomain, apikey };
@@ -1005,7 +1025,7 @@ function sendAccWa(key) {
 }
 
 function loadConfigUI() {
-  document.getElementById('cfg-proxy').value = cfg.proxyUrl || '';
+  document.getElementById('cfg-proxy').value = cfg.proxyUrl || '/api/daftra';
   document.getElementById('cfg-subdomain').value = cfg.subdomain || '';
   document.getElementById('cfg-apikey').value = cfg.apikey || '';
   setConfigSaveStatus(hasConfig() ? 'إعدادات دفترة محفوظة، لن تحتاج إدخالها كل مرة' : '');
@@ -1029,13 +1049,21 @@ async function syncDaftra() {
       return data;
     };
 
-    const [estRes, invRes] = await Promise.all([
-      post('estimates.json?limit=100&page=1'),
-      post('invoices.json?limit=100&page=1')
-    ]);
+    const fetchPages = async base => {
+      const rows = [];
+      for (let page = 1; page <= 5; page++) {
+        const data = await post(`${base}.json?limit=100&page=${page}`);
+        const batch = data?.data || [];
+        rows.push(...batch);
+        if (batch.length < 100) break;
+      }
+      return rows;
+    };
 
-    const estimates = estRes?.data || [];
-    const invoices  = invRes?.data  || [];
+    const [estimates, invoices] = await Promise.all([
+      fetchPages('estimates'),
+      fetchPages('invoices')
+    ]);
     if (!estimates.length && !invoices.length) {
       showMsg('⚠️ تم الاتصال بدفترة لكن لم ترجع عروض أو فواتير. راجع الصلاحيات أو تاريخ البيانات في دفترة');
     }
@@ -2213,7 +2241,14 @@ async function boot() {
   if (shouldShowLoginScreen()) showLoginScreen(); else hideLoginScreen();
   await hydrateConfig();
   if (hasConfig()) {
-    showMsg('✅ إعدادات دفترة جاهزة. افتح تبويب العملاء للمزامنة');
+    showMsg('✅ إعدادات دفترة جاهزة. ستعمل المزامنة تلقائياً كل 10 دقائق');
+    if (!syncTimer) {
+      syncTimer = setInterval(() => {
+        const oldTab = activeTab;
+        activeTab = 'clients';
+        syncDaftra().finally(() => { activeTab = oldTab; });
+      }, 10 * 60 * 1000);
+    }
   } else if (can('settings')) {
     showMsg('⚠️ إعدادات دفترة تضبط من تبويب العملاء');
   } else {
