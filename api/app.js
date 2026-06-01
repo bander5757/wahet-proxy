@@ -588,7 +588,7 @@ async function updateFinanceStatus(client, payload, user) {
   const result = await client.query(
     `update finance_entries
      set status = $1,
-         approved_by = case when $1 in ('approved', 'rejected') then $2 else null end,
+         approved_by = case when $1 in ('approved', 'rejected') then $2::uuid else null end,
          approved_at = case when $1 in ('approved', 'rejected') then now() else null end
      where id = $3
      returning *`,
