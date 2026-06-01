@@ -1,0 +1,21 @@
+{
+  "name": "واحة الخيمة - لوحة المؤسسة",
+  "short_name": "واحة الخيمة",
+  "description": "لوحة متابعة العملاء والمحاسبة والتركيبات والمنافسات لمؤسسة واحة الخيمة.",
+  "dir": "rtl",
+  "lang": "ar-SA",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

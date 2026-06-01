@@ -3,25 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>واحة الخيمة — إدارة العملاء</title>
+<meta name="theme-color" content="#0f1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="واحة الخيمة">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon.svg">
+<title>واحة الخيمة — لوحة المؤسسة</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1117; color: #e8e6e1; direction: rtl; min-height: 100vh; padding: 1rem; }
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1117; color: #e8e6e1; direction: rtl; min-height: 100vh; padding: 1rem; padding-bottom: 88px; }
+  body.light-mode { background: #f4f6f8; color: #17202a; }
   input, textarea, select { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; font-family: inherit; }
+  body.light-mode input, body.light-mode textarea, body.light-mode select { background: #fff; color: #17202a; border-color: #cfd7df; }
   button { cursor: pointer; font-family: inherit; border-radius: 8px; font-size: 13px; padding: 7px 14px; transition: opacity 0.2s; }
   button:hover { opacity: 0.85; }
   .btn-primary { background: #1a3a5c; color: #85B7EB; border: none; font-weight: 500; }
   .btn-secondary { background: transparent; color: #e8e6e1; border: 0.5px solid #2e3244; }
+  body.light-mode .btn-secondary { color: #17202a; border-color: #cfd7df; background: #fff; }
   .btn-green { background: #25D366; color: #fff; border: none; }
   .btn-sync { background: transparent; color: #5DCAA5; border: 0.5px solid #5DCAA5; }
   .card { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 12px; padding: 12px; }
   .section { background: #13161f; border: 0.5px solid #2e3244; border-radius: 12px; padding: 1rem; margin-bottom: 12px; }
+  body.light-mode .card, body.light-mode .section, body.light-mode .stat-card, body.light-mode .tab-btn { background: #fff; border-color: #d8e0e7; }
   .badge { font-size: 10px; padding: 2px 7px; border-radius: 6px; }
   .text-secondary { color: #9a9898; }
+  body.light-mode .text-secondary, body.light-mode .label { color: #637083; }
   .text-success { color: #5DCAA5; }
   .text-warning { color: #FAC775; }
   .text-info { color: #85B7EB; }
-  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
   .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .flex { display: flex; }
@@ -33,57 +44,133 @@
   .mt-8 { margin-top: 8px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 99; }
   .modal { background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 1.5rem; width: 440px; max-height: 90vh; overflow-y: auto; direction: rtl; }
+  body.light-mode .modal { background: #fff; border-color: #d8e0e7; }
   .row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-bottom: 0.5px solid #2e3244; }
+  body.light-mode .row, body.light-mode .list-row { border-bottom-color: #d8e0e7; }
   .notif { display: flex; gap: 8px; padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; }
   .kanban-col { min-height: 100px; }
   .client-card { cursor: pointer; margin-bottom: 8px; }
   .client-card:hover { border-color: #5DCAA5 !important; }
+  .client-overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .followup-card { border-color: #E24B4A; background: #241113; }
+  .month-group { border: 0.5px solid #2e3244; border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+  .month-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: #1a1d2b; border-bottom: 0.5px solid #2e3244; }
+  .tender-toolbox { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 12px; margin-bottom: 12px; }
+  .tender-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tender-chip { background: #1a1d2b; color: #e8e6e1; border: 0.5px solid #2e3244; border-radius: 8px; padding: 6px 9px; font-size: 12px; }
+  body.light-mode .month-group { border-color: #d8e0e7; }
+  body.light-mode .month-head { background: #f4f6f8; border-bottom-color: #d8e0e7; }
+  body.light-mode .followup-card { background: #fff3f3; border-color: #e78888; }
+  body.light-mode .tender-chip { background: #fff; color: #17202a; border-color: #d8e0e7; }
   .stat-card { background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; padding: 10px 12px; }
   #sync-msg { font-size: 12px; color: #9a9898; padding: 8px 12px; background: #13161f; border: 0.5px solid #2e3244; border-radius: 8px; margin-bottom: 10px; display: none; }
+  body.light-mode #sync-msg { background: #fff; color: #637083; border-color: #d8e0e7; }
   .label { font-size: 11px; color: #9a9898; margin-bottom: 3px; }
+  .app-header { gap: 12px; }
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .tabs { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 12px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn { flex: 0 0 auto; background: #13161f; color: #9a9898; border: 0.5px solid #2e3244; white-space: nowrap; }
+  .tab-btn.active { background: #1a3a5c; color: #85B7EB; border-color: #2c5f91; }
+  body.light-mode .tab-btn { color: #637083; }
+  body.light-mode .tab-btn.active { background: #e4f0fb; color: #175d9a; border-color: #9dc4e9; }
+  .tab-page { display: none; }
+  .tab-page.active { display: block; }
+  .dashboard-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 12px; align-items: start; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .list-row { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border-bottom: 0.5px solid #2e3244; padding: 9px 0; font-size: 12px; }
+  .list-row:last-child { border-bottom: none; }
+  .bottom-nav { display: none; }
+  body.light-mode .bottom-nav { background: #fff; border-top-color: #d8e0e7; }
+  body.light-mode .bottom-nav button { color: #637083; }
+  body.light-mode .bottom-nav button.active { background: #e4f0fb; color: #175d9a; }
+  .quick-fab { position: fixed; left: 16px; bottom: 18px; z-index: 80; min-width: 112px; box-shadow: 0 10px 28px rgba(0,0,0,.32); }
+  .login-screen { position: fixed; inset: 0; z-index: 120; background: #0f1117; display: none; align-items: center; justify-content: center; padding: 18px; }
+  body.light-mode .login-screen { background: #f4f6f8; }
+  .login-card { width: 420px; max-width: 100%; background: #1a1d2b; border: 0.5px solid #2e3244; border-radius: 16px; padding: 22px; }
+  body.light-mode .login-card { background: #fff; border-color: #d8e0e7; }
+  .daily-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .daily-card { border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .daily-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .daily-card-actions button { flex: 1 1 95px; }
+  @media (max-width: 900px) {
+    body { padding: 12px; padding-bottom: 96px; }
+    .app-header { align-items: flex-start; }
+    .header-actions button { padding: 7px 10px; }
+    .grid-5, .grid-4, .dashboard-grid, .kpi-grid, .client-overview-grid, .tender-toolbox { grid-template-columns: 1fr; }
+    .grid-2, .quick-grid { grid-template-columns: 1fr; }
+    .modal { width: min(440px, calc(100vw - 24px)); padding: 1rem; }
+    .daily-grid { grid-template-columns: 1fr; }
+    .daily-card { padding: 12px; }
+    .tabs { display: none; }
+    .bottom-nav { position: fixed; right: 0; left: 0; bottom: 0; z-index: 70; display: flex; gap: 4px; overflow-x: auto; background: #13161f; border-top: 0.5px solid #2e3244; padding: 7px 6px 8px; scrollbar-width: none; }
+    .bottom-nav::-webkit-scrollbar { display: none; }
+    .bottom-nav button { flex: 0 0 72px; border: none; background: transparent; color: #9a9898; padding: 5px 2px; font-size: 11px; border-radius: 8px; }
+    .bottom-nav button.active { background: #1a3a5c; color: #85B7EB; }
+    .quick-fab { left: 12px; bottom: 76px; }
+  }
 </style>
 </head>
 <body>
 
 <div id="sync-msg"></div>
 
-<!-- Header -->
-<div class="flex-between mb-12">
-  <div>
-    <div style="font-size:16px;font-weight:500">واحة الخيمة — إدارة العملاء</div>
-    <div id="last-sync" style="font-size:11px;color:#9a9898"></div>
-  </div>
-  <div class="flex gap-6">
-    <button class="btn-secondary" onclick="showDailyPanel()">📋 متابعة</button>
-    <button class="btn-secondary" onclick="toggleSettings()">⚙️ دفترة</button>
-    <button class="btn-sync" id="sync-btn" onclick="syncDaftra()">🔄 مزامنة</button>
-    <button class="btn-secondary" style="position:relative" onclick="toggleNotif()">
-      🔔 <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center">0</span>
-    </button>
-    <button class="btn-primary" onclick="toggleAdd()">+ يدوي</button>
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div style="font-size:19px;font-weight:700;margin-bottom:4px">واحة الخيمة</div>
+    <div class="text-secondary" style="font-size:12px;margin-bottom:18px">تسجيل الدخول إلى لوحة المؤسسة</div>
+    <div class="grid-2" style="margin-bottom:10px">
+      <div>
+        <div class="label">المستخدم</div>
+        <select id="screen-login-identifier"><option>ابو فايز المدير</option><option>بندر</option><option>المشرف</option><option>المحاسب</option></select>
+      </div>
+      <div>
+        <div class="label">الكود</div>
+        <input id="screen-login-code" type="password" inputmode="numeric" placeholder="****">
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#9a9898;margin:8px 0 14px">
+      <input id="screen-remember-login" type="checkbox" checked style="width:auto">
+      تذكرني على هذا الجهاز
+    </label>
+    <button class="btn-primary" style="width:100%;padding:12px" onclick="loginUserFromScreen()">دخول</button>
+    <button class="btn-secondary" style="width:100%;padding:10px;margin-top:8px" onclick="continueLocalPreview()">دخول تجريبي محلي</button>
+    <div class="text-secondary" style="font-size:11px;margin-top:12px;line-height:1.7">
+      عند ربط قاعدة البيانات سيتم التحقق من الكود وحفظ الجلسة تلقائيا عند اختيار تذكرني.
+    </div>
   </div>
 </div>
 
-<!-- Settings -->
-<div id="settings-panel" class="section" style="display:none">
-  <div style="font-size:14px;font-weight:500;margin-bottom:12px">⚙️ إعدادات ربط دفترة</div>
-  <div style="background:#0d1a0d;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#5DCAA5">
-    أدخل بيانات دفترة ثم اضغط حفظ
+<!-- Header -->
+<div class="flex-between mb-12 app-header">
+  <div>
+    <div style="font-size:16px;font-weight:600">واحة الخيمة — لوحة المؤسسة</div>
+    <div style="font-size:11px;color:#9a9898;margin-top:2px">نظرة شاملة للعملاء، المال، التركيبات، والتنبيهات</div>
+    <div id="db-status" style="font-size:11px;color:#FAC775;margin-top:2px">وضع محلي</div>
+    <div id="user-status" style="font-size:11px;color:#85B7EB;margin-top:2px"></div>
   </div>
-  <div class="label">رابط Vercel الوسيط</div>
-  <input id="cfg-proxy" type="text" placeholder="https://your-app.vercel.app/api/daftra" autocomplete="off" style="margin-bottom:10px">
-  <div class="label">Subdomain في دفترة</div>
-  <input id="cfg-subdomain" type="text" placeholder="wkaimah" autocomplete="off" style="margin-bottom:10px">
-  <div class="label">مفتاح API</div>
-  <div style="position:relative">
-    <input id="cfg-apikey" type="text" placeholder="API Key" autocomplete="off" style="margin-bottom:12px;padding-left:60px">
-    <button type="button" onclick="toggleApiKeyVisibility()" id="apikey-toggle"
-      style="position:absolute;left:6px;top:50%;transform:translateY(-60%);background:transparent;border:none;color:#9a9898;font-size:11px;padding:2px 6px;cursor:pointer">إخفاء</button>
+  <div class="flex gap-6 header-actions">
+    <button class="btn-secondary" onclick="showDailyPanel()">📋 متابعة</button>
+    <button class="btn-secondary" onclick="openLogin()">👤 دخول</button>
+    <button class="btn-secondary" id="theme-btn" onclick="toggleTheme()">☀️ عادي</button>
+    <button class="btn-secondary" style="position:relative" onclick="toggleNotif()">
+      🔔 <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center">0</span>
+    </button>
+    <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
+    <button class="btn-primary" data-action="addClient" onclick="toggleAdd()">+ يدوي</button>
   </div>
-  <div class="flex gap-8">
-    <button class="btn-primary" onclick="saveConfig()">حفظ والمزامنة</button>
-    <button class="btn-secondary" onclick="toggleSettings()">إلغاء</button>
-  </div>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="tab-btn active" onclick="setTab('home')">الرئيسية</button>
+  <button class="tab-btn" onclick="setTab('daily')">المتابعة</button>
+  <button class="tab-btn" onclick="setTab('clients')">العملاء</button>
+  <button class="tab-btn" onclick="setTab('finance')">المحاسبة</button>
+  <button class="tab-btn" onclick="setTab('ops')">التركيبات</button>
+  <button class="tab-btn" onclick="setTab('assets')">الموظفين والسيارات</button>
+  <button class="tab-btn" onclick="setTab('tenders')">المنافسات</button>
+  <button class="tab-btn" onclick="setTab('reports')">التقارير</button>
 </div>
 
 <!-- Notifications -->
@@ -102,6 +189,7 @@
     <div><div class="label">الموقع</div><input id="f-location" type="text"></div>
     <div><div class="label">القيمة (ر.س)</div><input id="f-price" type="number"></div>
     <div><div class="label">تاريخ التركيب</div><input id="f-date" type="date"></div>
+    <div><div class="label">حالة عرض السعر</div><select id="f-confirmed"><option value="0">غير مؤكد</option><option value="1">مؤكد</option></select></div>
   </div>
   <div class="flex gap-8">
     <button class="btn-primary" onclick="addClient()">حفظ</button>
@@ -109,15 +197,281 @@
   </div>
 </div>
 
-<!-- Kanban -->
-<div class="grid-5" id="kanban"></div>
+<div id="tab-home" class="tab-page active">
+  <div id="executive-dashboard"></div>
+</div>
 
-<!-- Stats -->
-<div class="grid-4" id="stats"></div>
+<div id="tab-daily" class="tab-page">
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">المتابعة اليومية</div>
+        <div id="daily-tab-date" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
+      </div>
+      <button class="btn-secondary" onclick="renderDashboard()">تحديث</button>
+    </div>
+    <div id="daily-tab-content"></div>
+  </div>
+</div>
+
+<div id="tab-clients" class="tab-page">
+  <div id="settings-panel" class="section" style="display:none">
+    <div style="font-size:14px;font-weight:500;margin-bottom:12px">⚙️ إعدادات ربط دفترة</div>
+    <div style="background:#0d1a0d;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#5DCAA5">
+      أدخل بيانات دفترة ثم اضغط حفظ
+    </div>
+    <div class="label">رابط Vercel الوسيط</div>
+    <input id="cfg-proxy" type="text" placeholder="https://your-app.vercel.app/api/daftra" autocomplete="off" style="margin-bottom:10px">
+    <div class="label">Subdomain في دفترة</div>
+    <input id="cfg-subdomain" type="text" placeholder="wkaimah" autocomplete="off" style="margin-bottom:10px">
+    <div class="label">مفتاح API</div>
+    <div style="position:relative">
+      <input id="cfg-apikey" type="text" placeholder="API Key" autocomplete="off" style="margin-bottom:12px;padding-left:60px">
+      <button type="button" onclick="toggleApiKeyVisibility()" id="apikey-toggle"
+        style="position:absolute;left:6px;top:50%;transform:translateY(-60%);background:transparent;border:none;color:#9a9898;font-size:11px;padding:2px 6px;cursor:pointer">إخفاء</button>
+    </div>
+    <div id="cfg-save-status" style="font-size:11px;color:#9a9898;margin:-4px 0 12px"></div>
+    <div class="flex gap-8">
+      <button class="btn-primary" onclick="saveConfig()">حفظ والمزامنة</button>
+      <button class="btn-secondary" onclick="toggleSettings()">إلغاء</button>
+    </div>
+  </div>
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">عملاء وعروض دفترة</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">الجلب من دفترة يتم من هذا التبويب فقط</div>
+        <div id="last-sync" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
+      </div>
+      <div class="flex gap-6" style="flex-wrap:wrap;justify-content:flex-end">
+        <button class="btn-secondary" data-action="settings" onclick="toggleSettings()">⚙️ إعدادات دفترة</button>
+        <button class="btn-sync" data-action="sync" id="sync-btn" onclick="syncDaftra()">🔄 مزامنة دفترة</button>
+      </div>
+    </div>
+  </div>
+  <div class="client-overview-grid">
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">متابعة عروض السعر</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">العروض غير المؤكدة تظهر بالأحمر حتى يتم تأكيدها أو إغلاقها</div>
+        </div>
+        <span id="pending-quotes-count" class="badge" style="background:#E24B4A;color:#fff">0</span>
+      </div>
+      <div id="pending-quotes-list"></div>
+    </div>
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">عروض الأسعار حسب الشهر</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">حسب تاريخ عرض السعر: الشهر الحالي أولاً ثم الأقدم</div>
+        </div>
+        <span id="monthly-jobs-count" class="badge" style="background:#1a3a5c;color:#85B7EB">0</span>
+      </div>
+      <div id="monthly-jobs-list"></div>
+    </div>
+  </div>
+  <div class="grid-5" id="kanban"></div>
+  <div class="grid-4" id="stats"></div>
+</div>
+
+<div id="tab-finance" class="tab-page">
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">المحاسبة اليومية</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">مصروفات، عهد، إيرادات، سلف، وديون</div>
+      </div>
+      <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
+    </div>
+    <div id="finance-summary" class="grid-4"></div>
+    <div id="finance-list" class="mt-8"></div>
+  </div>
+</div>
+
+<div id="tab-ops" class="tab-page">
+  <div class="section">
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">التركيبات القادمة</div>
+    <div id="install-list"></div>
+  </div>
+</div>
+
+<div id="tab-assets" class="tab-page">
+  <div class="dashboard-grid">
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">تنبيهات عامة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">مواعيد وملاحظات لا ترتبط بموظف أو سيارة</div>
+        </div>
+        <button class="btn-secondary" data-action="assetManage" onclick="toggleGeneralAlertForm()">+ تنبيه</button>
+      </div>
+      <div id="general-alert-form" style="display:none;margin-bottom:12px">
+        <div class="grid-2">
+          <div><div class="label">اسم التنبيه</div><input id="general-alert-title" type="text" placeholder="مثال: تجديد اشتراك منصة"></div>
+          <div><div class="label">تاريخ التنبيه</div><input id="general-alert-date" type="date"></div>
+          <div style="grid-column:1/-1"><div class="label">ملاحظات</div><textarea id="general-alert-note" rows="3" placeholder="اختياري"></textarea></div>
+        </div>
+        <div class="flex gap-8 mt-8">
+          <button class="btn-primary" onclick="saveGeneralAlert()">حفظ</button>
+          <button class="btn-secondary" onclick="toggleGeneralAlertForm()">إلغاء</button>
+        </div>
+      </div>
+      <div id="general-alerts"></div>
+    </div>
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">تنبيهات الموظفين</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">إقامات، رخص عمل، وتأمينات</div>
+        </div>
+        <button class="btn-secondary" data-action="assetManage" onclick="toggleStaffForm()">+ مستند</button>
+      </div>
+      <div id="staff-form" style="display:none;margin-bottom:12px">
+        <div class="grid-2">
+          <div><div class="label">الاسم</div><input id="staff-name" type="text" placeholder="عمر"></div>
+          <div><div class="label">نوع المستند</div><select id="staff-type"><option>إقامة</option><option>رخصة عمل</option><option>تأمين</option><option>عقد</option><option>أخرى</option></select></div>
+          <div><div class="label">تاريخ الانتهاء</div><input id="staff-expires" type="date"></div>
+          <div><div class="label">ملاحظة</div><input id="staff-note" type="text" placeholder="اختياري"></div>
+        </div>
+        <div class="flex gap-8 mt-8">
+          <button class="btn-primary" onclick="saveStaffDoc()">حفظ</button>
+          <button class="btn-secondary" onclick="toggleStaffForm()">إلغاء</button>
+        </div>
+      </div>
+      <div id="staff-alerts"></div>
+    </div>
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">السيارات والصيانة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">زيت، فحص، تأمين، استمارة وصيانة</div>
+        </div>
+        <button class="btn-secondary" data-action="assetManage" onclick="toggleVehicleForm()">+ صيانة</button>
+      </div>
+      <div id="vehicle-form" style="display:none;margin-bottom:12px">
+        <div class="grid-2">
+          <div><div class="label">السيارة</div><input id="vehicle-name" type="text" placeholder="سيارة التركيب"></div>
+          <div><div class="label">نوع التنبيه</div><select id="vehicle-type"><option>تغيير زيت</option><option>فحص</option><option>تأمين</option><option>استمارة</option><option>صيانة</option><option>أخرى</option></select></div>
+          <div><div class="label">تاريخ الاستحقاق</div><input id="vehicle-due" type="date"></div>
+          <div><div class="label">عداد/ملاحظة</div><input id="vehicle-odometer" type="text" placeholder="كل 5,000 كم"></div>
+        </div>
+        <div class="flex gap-8 mt-8">
+          <button class="btn-primary" onclick="saveVehicleTask()">حفظ</button>
+          <button class="btn-secondary" onclick="toggleVehicleForm()">إلغاء</button>
+        </div>
+      </div>
+      <div id="vehicle-alerts"></div>
+    </div>
+  </div>
+</div>
+
+<div id="tab-tenders" class="tab-page">
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">رادار المنافسات</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">رصد يومي للخيام الأوروبية في اعتماد وفرص</div>
+      </div>
+      <button class="btn-secondary" data-action="tenders" onclick="toggleTenderForm()">+ منافسة</button>
+    </div>
+    <div class="tender-toolbox">
+      <div class="stat-card">
+        <div class="label">مصادر الرصد</div>
+        <div id="tender-platforms"></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">كلمات الخيام الأوروبية</div>
+        <div id="tender-keywords"></div>
+      </div>
+    </div>
+    <div id="tender-form" style="display:none;margin-bottom:12px">
+      <div class="grid-2">
+        <div><div class="label">عنوان المنافسة</div><input id="tender-title" type="text"></div>
+        <div><div class="label">الجهة</div><input id="tender-entity" type="text"></div>
+        <div><div class="label">آخر موعد</div><input id="tender-due" type="date"></div>
+        <div><div class="label">التقييم</div><select id="tender-score"><option>تحتاج مراجعة</option><option>مناسبة</option><option>غير مناسبة</option></select></div>
+        <div><div class="label">المصدر</div><select id="tender-platform"><option>اعتماد</option><option>تنافس</option><option>فرص</option><option>فرص الترفيه</option><option>بحث الإنترنت</option><option>أخرى</option></select></div>
+        <div><div class="label">الكلمة المطابقة</div><select id="tender-keyword"></select></div>
+        <div style="grid-column:1/-1"><div class="label">الرابط</div><input id="tender-url" type="url" placeholder="https://"></div>
+        <div style="grid-column:1/-1"><div class="label">سبب التقييم</div><textarea id="tender-reason" rows="3"></textarea></div>
+      </div>
+      <div class="flex gap-8 mt-8">
+        <button class="btn-primary" onclick="saveTender()">حفظ</button>
+        <button class="btn-secondary" onclick="toggleTenderForm()">إلغاء</button>
+      </div>
+    </div>
+    <div id="tender-list"></div>
+  </div>
+</div>
+
+<div id="tab-reports" class="tab-page">
+  <div class="section">
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">التقارير</div>
+    <div id="reports-view"></div>
+  </div>
+</div>
 
 <!-- Modal -->
 <div id="modal" class="modal-overlay" style="display:none" onclick="closeModal()">
   <div class="modal" onclick="event.stopPropagation()" id="modal-content"></div>
+</div>
+
+<div id="login-modal" class="modal-overlay" style="display:none" onclick="closeLogin()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">دخول المستخدم</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">اختر اسمك وأدخل الكود</div>
+      </div>
+      <button class="btn-secondary" onclick="closeLogin()">إغلاق</button>
+    </div>
+    <div class="grid-2" style="margin-bottom:10px">
+      <div><div class="label">المستخدم</div><select id="login-identifier"><option>ابو فايز المدير</option><option>بندر</option><option>المشرف</option><option>المحاسب</option></select></div>
+      <div><div class="label">الكود</div><input id="login-code" type="password" inputmode="numeric" placeholder="****"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#9a9898;margin:8px 0 14px">
+      <input id="remember-login" type="checkbox" checked style="width:auto">
+      تذكرني على هذا الجهاز
+    </label>
+    <button class="btn-primary" style="width:100%;padding:11px" onclick="loginUser()">دخول</button>
+    <button class="btn-secondary" style="width:100%;padding:10px;margin-top:8px" onclick="logoutUser()">تسجيل خروج</button>
+  </div>
+</div>
+
+<div id="quick-entry" class="modal-overlay" style="display:none" onclick="closeQuickEntry()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">تسجيل حركة سريعة</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">مناسب للجوال أثناء العمل خارج المكتب</div>
+      </div>
+      <button class="btn-secondary" onclick="closeQuickEntry()">إغلاق</button>
+    </div>
+    <div class="grid-2" style="margin-bottom:10px">
+      <div><div class="label">النوع</div><select id="q-type"><option>مصروف</option><option>عهدة</option><option>إيراد</option><option>سلفة</option><option>دين</option><option>تحويل</option></select></div>
+      <div><div class="label">المبلغ</div><input id="q-amount" type="number" inputmode="decimal"></div>
+      <div><div class="label">الحساب</div><select id="q-account"><option>الحساب الرسمي</option><option>الحساب الفرعي</option><option>كاش</option></select></div>
+      <div><div class="label">التصنيف</div><select id="q-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
+      <div><div class="label">الشخص</div><input id="q-person" type="text" placeholder="عمر / ابو فايز / صدام / المورد"></div>
+      <div style="grid-column:1/-1"><div class="label">البيان</div><textarea id="q-note" rows="3" placeholder="مثال: عهدة لعمر لشراء مستلزمات تركيب"></textarea></div>
+      <div style="grid-column:1/-1"><div class="label">صورة الإيصال</div><input id="q-file" type="file" accept="image/*,.pdf"></div>
+    </div>
+    <button class="btn-green" style="width:100%;padding:11px" onclick="saveQuickEntry()">حفظ الحركة</button>
+  </div>
+</div>
+
+<button class="btn-green quick-fab" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
+
+<div class="bottom-nav" id="bottom-nav">
+  <button class="active" onclick="setTab('home')">الرئيسية</button>
+  <button onclick="setTab('daily')">المتابعة</button>
+  <button onclick="setTab('clients')">العملاء</button>
+  <button onclick="setTab('finance')">المحاسبة</button>
+  <button onclick="setTab('ops')">التركيبات</button>
+  <button onclick="setTab('assets')">التنبيهات</button>
+  <button onclick="setTab('tenders')">المنافسات</button>
+  <button onclick="setTab('reports')">التقارير</button>
 </div>
 
 <!-- Daily Panel -->
@@ -135,24 +489,428 @@
 </div>
 
 <script>
-const STAGES = ['عرض_سعر','موافق','فاتورة_صادرة','تم_التركيب','مكتمل'];
-const LABELS = {'عرض_سعر':'عرض السعر','موافق':'موافق','فاتورة_صادرة':'فاتورة صادرة','تم_التركيب':'تم التركيب','مكتمل':'مكتمل'};
-const COLORS = {'عرض_سعر':'#B5D4F4','موافق':'#FAC775','فاتورة_صادرة':'#C0DD97','تم_التركيب':'#9FE1CB','مكتمل':'#CECBF6'};
-const CTXT  = {'عرض_سعر':'#0C447C','موافق':'#633806','فاتورة_صادرة':'#27500A','تم_التركيب':'#085041','مكتمل':'#3C3489'};
+const STAGES = ['عرض_سعر','موافق','فاتورة_صادرة','تم_التركيب','مكتمل','استغنى'];
+const WORKFLOW_STAGES = ['عرض_سعر','موافق','فاتورة_صادرة','تم_التركيب','مكتمل'];
+const LABELS = {'عرض_سعر':'عرض السعر','موافق':'موافق','فاتورة_صادرة':'فاتورة صادرة','تم_التركيب':'تم التركيب','مكتمل':'مكتمل','استغنى':'استغنى'};
+const COLORS = {'عرض_سعر':'#B5D4F4','موافق':'#FAC775','فاتورة_صادرة':'#C0DD97','تم_التركيب':'#9FE1CB','مكتمل':'#CECBF6','استغنى':'#F1B2B2'};
+const CTXT  = {'عرض_سعر':'#0C447C','موافق':'#633806','فاتورة_صادرة':'#27500A','تم_التركيب':'#085041','مكتمل':'#3C3489','استغنى':'#7A1818'};
 
 let clients = [];
+try { clients = JSON.parse(localStorage.getItem('wk_clients') || '[]'); } catch(e) { clients = []; }
+let clientState = {};
+try { clientState = JSON.parse(localStorage.getItem('wk_client_state') || '{}'); } catch(e) { clientState = {}; }
 let cfg = {};
-try { cfg = JSON.parse(localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
+try { cfg = JSON.parse(localStorage.getItem('wk_cfg_v2') || localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
 cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, cfg);
 let syncTimer = null;
 const omarWaMsgs = {};
 const accWaMsgs  = {};
 const dismissed  = new Set();
+let activeTab = 'home';
+let financeEntries = [];
+try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
+let staffDocs = [];
+try { staffDocs = JSON.parse(localStorage.getItem('wk_staff_docs') || '[]'); } catch(e) { staffDocs = []; }
+let vehicles = [];
+try { vehicles = JSON.parse(localStorage.getItem('wk_vehicles') || '[]'); } catch(e) { vehicles = []; }
+let generalAlerts = [];
+try { generalAlerts = JSON.parse(localStorage.getItem('wk_general_alerts') || '[]'); } catch(e) { generalAlerts = []; }
+let theme = 'dark';
+try { theme = localStorage.getItem('wk_theme') || 'dark'; } catch(e) {}
+let currentUser = null;
+let authToken = '';
+try { currentUser = JSON.parse(localStorage.getItem('wk_current_user') || 'null'); } catch(e) { currentUser = null; }
+try { authToken = localStorage.getItem('wk_auth_token') || ''; } catch(e) {}
+let loginRequired = true;
+try { loginRequired = localStorage.getItem('wk_login_skipped') !== '1'; } catch(e) {}
+let tenders = [
+  { title: 'تجهيز خيام وفعاليات موسمية', entity: 'جهة حكومية', due: '2026-06-20', score: 'تحتاج مراجعة', url: '#', reason: 'تحتوي على خيام وتجهيز فعاليات' },
+  { title: 'توريد دورات مياه متنقلة للفعاليات', entity: 'شركة فعاليات', due: '2026-06-12', score: 'مناسبة', url: '#', reason: 'مرتبطة بمنتج مساند موجود لديكم' }
+];
+try { tenders = JSON.parse(localStorage.getItem('wk_tenders') || JSON.stringify(tenders)); } catch(e) {}
+const APP_API = '/api/app';
+let apiOnline = false;
+if (!staffDocs.length) {
+  staffDocs = [
+    { name: 'عمر', type: 'إقامة', expires: '2026-07-15' },
+    { name: 'عامل تركيب', type: 'رخصة عمل', expires: '2026-08-05' }
+  ];
+}
+if (!vehicles.length) {
+  vehicles = [
+    { name: 'سيارة التركيب', type: 'تغيير زيت', due: '2026-06-18', odometer: 'كل 5,000 كم' },
+    { name: 'سيارة المؤسسة', type: 'استمارة/فحص', due: '2026-09-01', odometer: '' }
+  ];
+}
+staffDocs = staffDocs.map((x, i) => ({ id: x.id || 'staff_seed_' + i, ...x }));
+vehicles = vehicles.map((x, i) => ({ id: x.id || 'vehicle_seed_' + i, ...x }));
 
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
 const daysOld   = d => d ? Math.floor((new Date() - new Date(d)) / 86400000) : null;
+const money = n => (Number(n) || 0).toLocaleString() + ' ر.س';
+const FOLLOWUP_START_DATE = '2026-06-01';
+const monthKey = d => d ? d.slice(0, 7) : '';
+const monthLabel = key => {
+  if (!key) return 'بدون شهر';
+  const [year, month] = key.split('-').map(Number);
+  const label = new Date(year, month - 1, 1).toLocaleDateString('ar-SA', { month: 'long', year: 'numeric' });
+  return key === new Date().toISOString().slice(0, 7) ? 'الشهر الحالي - ' + label : label;
+};
+function applyTheme() {
+  document.body.classList.toggle('light-mode', theme === 'light');
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = theme === 'light' ? '🌙 ليلي' : '☀️ عادي';
+}
+function toggleTheme() {
+  theme = theme === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem('wk_theme', theme); } catch(e) {}
+  applyTheme();
+}
+const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب' || c.stage === 'مكتمل');
+const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
+const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!c.created || c.created >= FOLLOWUP_START_DATE);
+const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && c.created && c.created < FOLLOWUP_START_DATE;
+const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام'];
+const TENDER_PLATFORMS = [
+  { id: 'etimad', name: 'اعتماد', url: 'https://monafasat.etimad.sa/', site: 'monafasat.etimad.sa' },
+  { id: 'tanafos', name: 'تنافس', url: 'https://tanafos.sa/', site: 'tanafos.sa' },
+  { id: 'furas', name: 'فرص', url: 'https://furas.momah.gov.sa/ar', site: 'furas.momah.gov.sa' },
+  { id: 'gea', name: 'فرص الترفيه', url: 'https://gea.gov.sa/initiatives/furas-platform/', site: 'gea.gov.sa' },
+  { id: 'web', name: 'بحث الإنترنت', url: 'https://www.google.com/search?q=' + encodeURIComponent('خيام أوروبية مناقصة OR منافسة OR تأجير خيام'), site: '' }
+];
+const saveClients = () => {
+  try { localStorage.setItem('wk_clients', JSON.stringify(clients)); } catch(e) {}
+};
+const saveFinance = () => {
+  try { localStorage.setItem('wk_finance_entries', JSON.stringify(financeEntries)); } catch(e) {}
+};
+const saveStaffDocs = () => {
+  try { localStorage.setItem('wk_staff_docs', JSON.stringify(staffDocs)); } catch(e) {}
+};
+const saveVehicles = () => {
+  try { localStorage.setItem('wk_vehicles', JSON.stringify(vehicles)); } catch(e) {}
+};
+const saveGeneralAlerts = () => {
+  try { localStorage.setItem('wk_general_alerts', JSON.stringify(generalAlerts)); } catch(e) {}
+};
+const saveTenders = () => {
+  try { localStorage.setItem('wk_tenders', JSON.stringify(tenders)); } catch(e) {}
+};
+async function apiRequest(path, options = {}) {
+  const res = await fetch(APP_API + path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(authToken ? { 'X-Wahet-Token': authToken } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || 'فشل الاتصال بقاعدة البيانات');
+  return data;
+}
 
-function saveConfig() {
+async function loadAppData() {
+  const dbStatus = document.getElementById('db-status');
+  try {
+    const data = await apiRequest('/bootstrap');
+    apiOnline = true;
+    if (data.currentUser) {
+      currentUser = data.currentUser;
+      try { localStorage.setItem('wk_current_user', JSON.stringify(currentUser)); } catch(e) {}
+    }
+    if (dbStatus) {
+      dbStatus.textContent = 'قاعدة البيانات متصلة';
+      dbStatus.style.color = '#5DCAA5';
+    }
+    if (data.settings?.daftra?.subdomain && data.settings?.daftra?.apikey && data.settings?.daftra?.proxyUrl) {
+      cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, data.settings.daftra);
+      try {
+        localStorage.setItem('wk_cfg_v2', JSON.stringify(cfg));
+        localStorage.setItem('wk_cfg', JSON.stringify(cfg));
+      } catch(e) {}
+      try { await idbSet('daftra_config', cfg); } catch(e) {}
+      loadConfigUI();
+      setConfigSaveStatus('تم تحميل إعدادات دفترة من قاعدة البيانات');
+    }
+    if (Array.isArray(data.finance)) {
+      financeEntries = data.finance;
+      saveFinance();
+    }
+    if (Array.isArray(data.staffDocs)) {
+      staffDocs = data.staffDocs;
+      saveStaffDocs();
+    }
+    if (Array.isArray(data.vehicles)) {
+      vehicles = data.vehicles;
+      saveVehicles();
+    }
+    if (Array.isArray(data.generalAlerts)) {
+      generalAlerts = data.generalAlerts;
+      saveGeneralAlerts();
+    }
+    if (Array.isArray(data.tenders)) {
+      tenders = data.tenders;
+      saveTenders();
+    }
+    if (data.quoteStates && typeof data.quoteStates === 'object') {
+      clientState = data.quoteStates;
+      try { localStorage.setItem('wk_client_state', JSON.stringify(clientState)); } catch(e) {}
+    }
+    showMsg('✅ قاعدة البيانات متصلة');
+  } catch(e) {
+    apiOnline = false;
+    if (dbStatus) {
+      dbStatus.textContent = 'وضع محلي - لم يتم ربط قاعدة البيانات';
+      dbStatus.style.color = '#FAC775';
+    }
+    showMsg('⚠️ يعمل النظام محلياً حتى يتم ربط قاعدة البيانات');
+  }
+}
+function renderUserStatus() {
+  const el = document.getElementById('user-status');
+  if (!el) return;
+  el.textContent = currentUser ? 'المستخدم: ' + currentUser.name + ' — ' + roleLabel(currentUser.role) : 'لم يتم تسجيل الدخول';
+}
+function shouldShowLoginScreen() {
+  return loginRequired && !currentUser;
+}
+function showLoginScreen() {
+  const el = document.getElementById('login-screen');
+  if (el) el.style.display = 'flex';
+}
+function hideLoginScreen() {
+  const el = document.getElementById('login-screen');
+  if (el) el.style.display = 'none';
+}
+function loginIdentifiers(screen = false) {
+  return {
+    identifier: normalizeLoginIdentifier(document.getElementById(screen ? 'screen-login-identifier' : 'login-identifier').value),
+    code: document.getElementById(screen ? 'screen-login-code' : 'login-code').value.trim(),
+    remember: document.getElementById(screen ? 'screen-remember-login' : 'remember-login')?.checked !== false,
+  };
+}
+function normalizeLoginIdentifier(value) {
+  return ({
+    'ابو فايز المدير': 'ابو فايز',
+    'المشرف': 'عمر',
+    'المحاسب': 'صدام',
+  })[value] || value;
+}
+async function loginWithValues(identifier, code, remember) {
+  if (!code) { alert('أدخل الكود'); return false; }
+  if (!apiOnline) {
+    const localCodes = { 'بندر':'1111', 'ابو فايز':'2222', 'عمر':'3333', 'صدام':'4444' };
+    if (localCodes[identifier] && localCodes[identifier] !== code) {
+      alert('الكود غير صحيح');
+      return false;
+    }
+    const localRoles = { 'بندر':'owner', 'ابو فايز':'viewer', 'عمر':'supervisor', 'صدام':'accountant' };
+    currentUser = { name: identifier, role: localRoles[identifier] || 'viewer' };
+    if (remember) {
+      try {
+        localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
+        localStorage.removeItem('wk_login_skipped');
+      } catch(e) {}
+    }
+    loginRequired = true;
+    renderUserStatus();
+    applyPermissions();
+    hideLoginScreen();
+    closeLogin();
+    showMsg('✅ دخول محلي: ' + identifier);
+    return true;
+  }
+  try {
+    const res = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ identifier, code }) });
+    authToken = res.data.token;
+    currentUser = res.data.user;
+    if (remember) {
+      localStorage.setItem('wk_auth_token', authToken);
+      localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
+      localStorage.removeItem('wk_login_skipped');
+    }
+    loginRequired = true;
+    renderUserStatus();
+    applyPermissions();
+    hideLoginScreen();
+    closeLogin();
+    showMsg('✅ تم تسجيل الدخول: ' + currentUser.name);
+    return true;
+  } catch(e) {
+    alert(e.message);
+    return false;
+  }
+}
+function continueLocalPreview() {
+  currentUser = { name: 'ابو فايز', role: 'viewer' };
+  loginRequired = false;
+  try {
+    localStorage.setItem('wk_login_skipped', '1');
+    localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
+  } catch(e) {}
+  renderUserStatus();
+  applyPermissions();
+  hideLoginScreen();
+  showMsg('تم الدخول التجريبي المحلي');
+}
+async function loginUserFromScreen() {
+  const { identifier, code, remember } = loginIdentifiers(true);
+  await loginWithValues(identifier, code, remember);
+}
+function roleLabel(role) {
+  return ({ owner:'مالك', manager:'إدارة', supervisor:'مشرف', data_entry:'مدخل بيانات', accountant:'محاسب', viewer:'اطلاع' })[role] || role || '';
+}
+function userRole() {
+  return currentUser?.role || 'guest';
+}
+function isBandar() {
+  return currentUser?.name === 'بندر' || currentUser?.email === 'bander@wkaimah.local';
+}
+function can(action) {
+  const role = userRole();
+  const rules = {
+    sync: ['owner', 'accountant'],
+    addClient: ['owner', 'supervisor'],
+    quickEntry: ['owner', 'viewer', 'supervisor', 'accountant'],
+    approveFinance: ['owner', 'accountant', 'viewer'],
+    finance: ['owner', 'viewer', 'supervisor', 'accountant'],
+    assetManage: ['owner', 'supervisor'],
+    tenders: ['owner'],
+  };
+  if (action === 'settings') return isBandar();
+  return (rules[action] || []).includes(role);
+}
+function applyPermissions() {
+  document.querySelectorAll('[data-action]').forEach(el => {
+    const allowed = can(el.dataset.action);
+    el.style.display = allowed ? '' : 'none';
+  });
+  const settingsPanel = document.getElementById('settings-panel');
+  if (settingsPanel && !can('settings')) settingsPanel.style.display = 'none';
+}
+function openLogin() {
+  document.getElementById('login-modal').style.display = 'flex';
+  document.getElementById('login-code').value = '';
+}
+function closeLogin() {
+  document.getElementById('login-modal').style.display = 'none';
+}
+async function loginUser() {
+  const { identifier, code, remember } = loginIdentifiers(false);
+  await loginWithValues(identifier, code, remember);
+}
+function logoutUser() {
+  authToken = '';
+  currentUser = null;
+  try {
+    localStorage.removeItem('wk_auth_token');
+    localStorage.removeItem('wk_current_user');
+    localStorage.removeItem('wk_login_skipped');
+  } catch(e) {}
+  loginRequired = true;
+  renderUserStatus();
+  applyPermissions();
+  closeLogin();
+  showLoginScreen();
+  showMsg('تم تسجيل الخروج');
+}
+const applyClientState = c => Object.assign(c, clientState[c.id] || {});
+const saveClientState = c => {
+  clientState[c.id] = {
+    quoteConfirmed: Boolean(c.quoteConfirmed),
+    taxInvoiceIssued: Boolean(c.taxInvoiceIssued),
+    stage: c.stage,
+    installDate: c.installDate || '',
+    notes: c.notes || '',
+    assignedTo: c.assignedTo || '—'
+  };
+  try { localStorage.setItem('wk_client_state', JSON.stringify(clientState)); } catch(e) {}
+  if (apiOnline && c.source === 'daftra') {
+    apiRequest('/quote-states', { method: 'POST', body: JSON.stringify({
+      id: c.id,
+      daftraEstId: c.daftraEstId || null,
+      daftraInvId: c.daftraInvId || null,
+      daftraClientId: c.daftraClientId || null,
+      quoteConfirmed: Boolean(c.quoteConfirmed),
+      taxInvoiceIssued: Boolean(c.taxInvoiceIssued),
+      stage: c.stage,
+      installDate: c.installDate || null,
+      assignedTo: c.assignedTo || '—',
+      notes: c.notes || ''
+    }) }).catch(() => showMsg('⚠️ تم حفظ حالة العرض محلياً وتعذر حفظها في قاعدة البيانات'));
+  }
+};
+const hasConfig = () => Boolean(cfg.subdomain && cfg.apikey && cfg.proxyUrl);
+const setConfigSaveStatus = msg => {
+  const el = document.getElementById('cfg-save-status');
+  if (el) el.textContent = msg || '';
+};
+const openConfigStore = () => new Promise((resolve, reject) => {
+  if (!window.indexedDB) return reject(new Error('IndexedDB غير متاح'));
+  const req = indexedDB.open('wahet_khaima_store', 1);
+  req.onupgradeneeded = () => req.result.createObjectStore('settings');
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error || new Error('تعذر فتح التخزين'));
+});
+const idbGet = async key => {
+  const db = await openConfigStore();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('settings', 'readonly');
+    const req = tx.objectStore('settings').get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('تعذر قراءة التخزين'));
+    tx.oncomplete = () => db.close();
+  });
+};
+const idbSet = async (key, value) => {
+  const db = await openConfigStore();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('settings', 'readwrite');
+    tx.objectStore('settings').put(value, key);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => reject(tx.error || new Error('تعذر حفظ التخزين'));
+  });
+};
+async function savePersistedConfig(nextCfg) {
+  const savedIn = [];
+  try {
+    localStorage.setItem('wk_cfg_v2', JSON.stringify(nextCfg));
+    localStorage.setItem('wk_cfg', JSON.stringify(nextCfg));
+    savedIn.push('المتصفح');
+  } catch(e) {}
+  try {
+    await idbSet('daftra_config', nextCfg);
+    savedIn.push('التخزين الدائم');
+  } catch(e) {}
+  if (apiOnline) {
+    try {
+      await apiRequest('/settings/daftra', { method: 'POST', body: JSON.stringify(nextCfg) });
+      savedIn.push('قاعدة البيانات');
+    } catch(e) {
+      showMsg('⚠️ تم الحفظ محلياً، وتعذر حفظ إعدادات دفترة في قاعدة البيانات');
+    }
+  }
+  setConfigSaveStatus(savedIn.length ? 'تم حفظ إعدادات دفترة في: ' + savedIn.join(' + ') : '⚠️ لم يتم حفظ الإعدادات، سيُطلب إدخالها لاحقاً');
+  return savedIn.length > 0;
+}
+async function hydrateConfig() {
+  if (hasConfig()) return;
+  try {
+    const saved = await idbGet('daftra_config');
+    if (saved?.subdomain && saved?.apikey && saved?.proxyUrl) {
+      cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '' }, saved);
+      try {
+        localStorage.setItem('wk_cfg_v2', JSON.stringify(cfg));
+        localStorage.setItem('wk_cfg', JSON.stringify(cfg));
+      } catch(e) {}
+      loadConfigUI();
+      setConfigSaveStatus('تم استرجاع إعدادات دفترة المحفوظة');
+    }
+  } catch(e) {}
+}
+
+async function saveConfig() {
+  if (!can('settings')) {
+    alert('إعدادات دفترة متاحة لحساب بندر فقط');
+    return;
+  }
   const proxyUrl = document.getElementById('cfg-proxy').value.trim();
   const subdomain = document.getElementById('cfg-subdomain').value.trim();
   const apikey = document.getElementById('cfg-apikey').value.trim() || cfg.apikey;
@@ -160,13 +918,9 @@ function saveConfig() {
   if (!subdomain) { alert('الحقل المطلوب: Subdomain'); return; }
   if (!apikey)    { alert('الحقل المطلوب: مفتاح API'); return; }
   cfg = { proxyUrl, subdomain, apikey };
-  try {
-    localStorage.setItem('wk_cfg', JSON.stringify(cfg));
-  } catch(e) {
-    showMsg('⚠️ تعذّر الحفظ في المتصفح، البيانات مؤقتة للجلسة الحالية فقط');
-  }
+  const saved = await savePersistedConfig(cfg);
   toggleSettings();
-  showMsg('✅ تم حفظ الإعدادات — Subdomain: ' + subdomain);
+  showMsg((saved ? '✅ تم حفظ الإعدادات' : '⚠️ الإعدادات مؤقتة') + ' — Subdomain: ' + subdomain);
   syncDaftra();
 }
 
@@ -205,18 +959,26 @@ function loadConfigUI() {
   document.getElementById('cfg-proxy').value = cfg.proxyUrl || '';
   document.getElementById('cfg-subdomain').value = cfg.subdomain || '';
   document.getElementById('cfg-apikey').value = cfg.apikey || '';
+  setConfigSaveStatus(hasConfig() ? 'إعدادات دفترة محفوظة، لن تحتاج إدخالها كل مرة' : '');
 }
 
 async function syncDaftra() {
-  if (!cfg.subdomain || !cfg.apikey || !cfg.proxyUrl) { showMsg('⚠️ أدخل بيانات دفترة أولاً'); return; }
+  if (activeTab !== 'clients') { showMsg('⚠️ مزامنة دفترة من تبويب العملاء فقط'); return; }
+  if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ أدخل Subdomain ومفتاح دفترة أولاً'); return; }
+  const proxyUrl = cfg.proxyUrl || '/api/daftra';
   showMsg('⏳ جاري المزامنة مع دفترة...');
   document.getElementById('sync-btn').textContent = '⏳';
   try {
-    const post = (ep) => fetch(cfg.proxyUrl, {
+    const post = async (ep) => {
+      const res = await fetch(proxyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subdomain: cfg.subdomain, apikey: cfg.apikey, endpoint: ep, method: 'GET' })
-    }).then(r => r.json());
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || data.message || ('فشل طلب دفترة: ' + ep));
+      return data;
+    };
 
     const [estRes, invRes] = await Promise.all([
       post('estimates.json?limit=100&page=1'),
@@ -225,22 +987,31 @@ async function syncDaftra() {
 
     const estimates = estRes?.data || [];
     const invoices  = invRes?.data  || [];
+    if (!estimates.length && !invoices.length) {
+      showMsg('⚠️ تم الاتصال بدفترة لكن لم ترجع عروض أو فواتير. راجع الصلاحيات أو تاريخ البيانات في دفترة');
+    }
     const manual = clients.filter(c => c.source !== 'daftra');
     const merged = [...manual];
 
     estimates.forEach(e => {
       const est = e.Estimate || e;
       const hasInv = invoices.some(i => (i.Invoice||i).client_id === est.client_id);
-      if (!hasInv) merged.push({
-        id: 'est_' + est.id, daftraEstId: est.id, daftraClientId: est.client_id,
+      if (!hasInv) {
+        const card = {
+          id: 'est_' + est.id, daftraEstId: est.id, daftraClientId: est.client_id,
         name: est.client_business_name || est.client_first_name || 'عميل',
         phone: est.client_phone || '', products: '—', location: est.client_state || '',
         offerPrice: parseFloat(est.summary_total || 0),
         deposit: Math.round(parseFloat(est.summary_total || 0) / 2),
         remaining: Math.round(parseFloat(est.summary_total || 0) / 2),
+        quoteConfirmed: false, taxInvoiceIssued: false,
         stage: 'عرض_سعر', installDate: '', notes: '', assignedTo: '—',
         created: (est.date||'').slice(0,10), source: 'daftra', daftraNo: est.no
-      });
+        };
+        applyClientState(card);
+        if (card.quoteConfirmed && card.stage === 'عرض_سعر') card.stage = 'موافق';
+        merged.push(card);
+      }
     });
 
     invoices.forEach(inv => {
@@ -255,16 +1026,21 @@ async function syncDaftra() {
         offerPrice: parseFloat(i.summary_total || 0),
         deposit: Math.round(parseFloat(i.summary_total||0)/2),
         remaining: Math.round(parseFloat(i.summary_total||0)/2),
+        quoteConfirmed: true, taxInvoiceIssued: true,
         stage: ex?.stage === 'تم_التركيب' || ex?.stage === 'مكتمل' ? ex.stage : 'فاتورة_صادرة',
         installDate: ex?.installDate || '', notes: ex?.notes || '',
         assignedTo: ex?.assignedTo || '—',
         created: (i.date||'').slice(0,10), source: 'daftra', daftraNo: i.no
       };
+      applyClientState(card);
+      card.quoteConfirmed = true;
+      card.taxInvoiceIssued = true;
       const idx = merged.findIndex(c => c.daftraClientId === card.daftraClientId);
       if (idx >= 0) merged[idx] = card; else merged.push(card);
     });
 
     clients = merged;
+    saveClients();
     document.getElementById('last-sync').textContent = 'آخر مزامنة: ' + new Date().toLocaleTimeString('ar-SA');
     showMsg('✅ تمت المزامنة — ' + estimates.length + ' عرض سعر، ' + invoices.length + ' فاتورة');
     render();
@@ -276,6 +1052,7 @@ async function syncDaftra() {
 
 function addClient() {
   const p = parseFloat(document.getElementById('f-price').value) || 0;
+  const confirmed = document.getElementById('f-confirmed').value === '1';
   clients.push({
     id: 'manual_' + Date.now(),
     name: document.getElementById('f-name').value,
@@ -283,11 +1060,12 @@ function addClient() {
     products: document.getElementById('f-products').value,
     location: document.getElementById('f-location').value,
     offerPrice: p, deposit: Math.round(p/2), remaining: Math.round(p/2),
-    stage: 'عرض_سعر', installDate: document.getElementById('f-date').value,
+    quoteConfirmed: confirmed, taxInvoiceIssued: false,
+    stage: confirmed ? 'موافق' : 'عرض_سعر', installDate: document.getElementById('f-date').value,
     notes: '', assignedTo: 'بندر', source: 'manual',
     created: new Date().toISOString().slice(0,10)
   });
-  toggleAdd(); render();
+  saveClients(); toggleAdd(); render();
 }
 
 function waMsg(type, id) {
@@ -317,18 +1095,58 @@ function contactClient(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
   c.stage = 'موافق';
+  c.quoteConfirmed = true;
+  saveClientState(c);
+  saveClients();
+  render();
+}
+
+function setQuoteConfirmed(id, confirmed) {
+  const c = clients.find(x => x.id === id);
+  if (!c || isTaxInvoice(c)) return;
+  c.quoteConfirmed = confirmed;
+  c.stage = confirmed ? 'موافق' : 'عرض_سعر';
+  saveClientState(c);
+  saveClients();
+  closeModal();
+  render();
+}
+
+function setQuoteLost(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c || isTaxInvoice(c)) return;
+  c.quoteConfirmed = false;
+  c.taxInvoiceIssued = false;
+  c.stage = 'استغنى';
+  c.notes = (c.notes ? c.notes + ' | ' : '') + 'العميل استغنى عن العرض';
+  saveClientState(c);
+  saveClients();
+  closeModal();
+  render();
+}
+
+function reopenQuote(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c || isTaxInvoice(c)) return;
+  c.stage = 'عرض_سعر';
+  c.quoteConfirmed = false;
+  saveClientState(c);
+  saveClients();
   render();
 }
 
 function renderDashboard() {
-  const el = document.getElementById('daily-content');
-  if (!el) return;
+  const targets = ['daily-content', 'daily-tab-content'].map(id => document.getElementById(id)).filter(Boolean);
+  if (!targets.length) return;
   const today = new Date().toISOString().slice(0, 10);
-  const dd = document.getElementById('daily-date');
-  if (dd) dd.textContent = new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  const dateLabel = new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  ['daily-date', 'daily-tab-date'].forEach(id => {
+    const dd = document.getElementById(id);
+    if (dd) dd.textContent = dateLabel;
+  });
 
-  const stale    = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && c.created >= today && (daysOld(c.created)||0) > 3);
-  const newToday = clients.filter(c => !dismissed.has(c.id) && c.stage === 'عرض_سعر' && c.created === today);
+  const stale    = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && (daysOld(c.created)||0) > 3);
+  const newToday = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && c.created === today);
   const todayInst = clients.filter(c =>
     !dismissed.has(c.id) &&
     (c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب') &&
@@ -354,7 +1172,7 @@ function renderDashboard() {
   };
 
   const card = (color, bg, name, info, daysLbl, id, btns, doneFn) => `
-    <div style="background:${bg};border-right:3px solid ${color};border-radius:8px;padding:10px 12px;margin-bottom:8px">
+    <div class="daily-card" style="background:${bg};border-right:3px solid ${color}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px">
         <div>
           <div style="font-size:13px;font-weight:600">${name}</div>
@@ -362,9 +1180,9 @@ function renderDashboard() {
         </div>
         <span style="font-size:11px;color:${color};font-weight:700;white-space:nowrap;flex-shrink:0">${daysLbl}</span>
       </div>
-      <div style="display:flex;gap:6px">
+      <div class="daily-card-actions">
         ${btns}
-        <button onclick="${doneFn}" style="flex:1;background:transparent;color:#9a9898;border:0.5px solid #2e3244;border-radius:6px;padding:4px 0;font-size:11px;cursor:pointer;font-family:inherit">✓ تم</button>
+        <button onclick="${doneFn}" style="background:transparent;color:#9a9898;border:0.5px solid #2e3244;border-radius:6px;padding:4px 0;font-size:11px;cursor:pointer;font-family:inherit">✓ تم</button>
       </div>
     </div>`;
 
@@ -376,8 +1194,8 @@ function renderDashboard() {
 
   const noItems = `<div style="font-size:11px;color:#444;padding:2px 0 10px">لا يوجد</div>`;
 
-  el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+  const html = `
+    <div class="daily-grid">
       <div style="background:#1f0e0e;border:0.5px solid #E24B4A50;border-radius:10px;padding:12px 8px;text-align:center">
         <div style="font-size:22px;font-weight:700;color:#E24B4A">${urgentCount}</div>
         <div style="font-size:10px;color:#9a9898;margin-top:3px">🔴 عاجل</div>
@@ -440,6 +1258,7 @@ function renderDashboard() {
       "dismissNotif('"+c.id+"')"
     )).join('') : noItems}
   `;
+  targets.forEach(el => { el.innerHTML = html; });
 }
 
 function showDailyPanel() {
@@ -447,11 +1266,613 @@ function showDailyPanel() {
   document.getElementById('daily-panel').style.display = 'flex';
 }
 
+function setTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  const page = document.getElementById('tab-' + tab);
+  if (page) page.classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
+  document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
+  if (tab !== 'clients') {
+    const settingsPanel = document.getElementById('settings-panel');
+    if (settingsPanel) settingsPanel.style.display = 'none';
+  }
+  render();
+}
+
+function openQuickEntry(type) {
+  document.getElementById('quick-entry').style.display = 'flex';
+  if (type) document.getElementById('q-type').value = type;
+  setTimeout(() => document.getElementById('q-amount')?.focus(), 50);
+}
+
+function closeQuickEntry() {
+  document.getElementById('quick-entry').style.display = 'none';
+}
+
+async function saveQuickEntry() {
+  const amount = parseFloat(document.getElementById('q-amount').value) || 0;
+  const type = document.getElementById('q-type').value;
+  const account = document.getElementById('q-account').value;
+  const category = document.getElementById('q-category').value;
+  const person = document.getElementById('q-person').value.trim();
+  const note = document.getElementById('q-note').value.trim();
+  const file = document.getElementById('q-file').files[0];
+  if (!amount) { alert('أدخل المبلغ'); return; }
+  if (!note) { alert('أدخل البيان'); return; }
+  const entry = {
+    id: 'fin_' + Date.now(),
+    type, amount, account, person, note,
+    category,
+    attachment: file ? file.name : '',
+    created: new Date().toISOString(),
+    createdBy: currentUser?.name || 'مدخل'
+  };
+  let savedRemote = false;
+  entry.status = 'draft';
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/finance', { method: 'POST', body: JSON.stringify(entry) });
+      financeEntries.unshift(res.data);
+      savedRemote = true;
+    } catch(e) {
+      apiOnline = false;
+      financeEntries.unshift(entry);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً');
+    }
+  } else {
+    financeEntries.unshift(entry);
+  }
+  saveFinance();
+  ['q-amount','q-person','q-note','q-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  closeQuickEntry();
+  showMsg((savedRemote ? '✅ تم حفظ الحركة في قاعدة البيانات' : '✅ تم حفظ الحركة محلياً') + ': ' + type + ' — ' + money(amount));
+  setTab('finance');
+}
+
+async function setFinanceStatus(id, status) {
+  if (!can('approveFinance')) {
+    alert('الاعتماد متاح لأبو فايز المدير وبندر والمحاسب فقط');
+    return;
+  }
+  const idx = financeEntries.findIndex(e => e.id === id);
+  if (idx < 0) return;
+  const old = financeEntries[idx];
+  financeEntries[idx] = { ...old, status };
+  saveFinance();
+  render();
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/finance/status', { method: 'POST', body: JSON.stringify({ id, status }) });
+      financeEntries[idx] = res.data;
+      saveFinance();
+      render();
+    } catch(e) {
+      financeEntries[idx] = old;
+      saveFinance();
+      render();
+      alert(e.message);
+      return;
+    }
+  }
+  showMsg('تم تحديث حالة الحركة إلى: ' + financeStatusLabel(status));
+}
+
+function toggleStaffForm() {
+  const p = document.getElementById('staff-form');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveStaffDoc() {
+  const name = document.getElementById('staff-name').value.trim();
+  const type = document.getElementById('staff-type').value;
+  const expires = document.getElementById('staff-expires').value;
+  const note = document.getElementById('staff-note').value.trim();
+  if (!name) { alert('أدخل الاسم'); return; }
+  if (!expires) { alert('أدخل تاريخ الانتهاء'); return; }
+  const item = { id: 'staff_' + Date.now(), name, type, expires, note };
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/staff-docs', { method: 'POST', body: JSON.stringify(item) });
+      staffDocs.unshift(res.data);
+    } catch(e) {
+      staffDocs.unshift(item);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً');
+    }
+  } else {
+    staffDocs.unshift(item);
+  }
+  saveStaffDocs();
+  ['staff-name','staff-expires','staff-note'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('staff-type').value = 'إقامة';
+  toggleStaffForm();
+  showMsg('✅ تم حفظ تنبيه الموظف');
+  render();
+}
+
+async function removeStaffDoc(id) {
+  if (!confirm('حذف هذا التنبيه؟')) return;
+  const old = staffDocs.slice();
+  staffDocs = staffDocs.filter(x => x.id !== id);
+  saveStaffDocs();
+  render();
+  if (apiOnline && id && !id.startsWith('staff_') && !id.startsWith('staff_seed_')) {
+    try {
+      await apiRequest('/staff-docs/delete', { method: 'POST', body: JSON.stringify({ id }) });
+    } catch(e) {
+      staffDocs = old;
+      saveStaffDocs();
+      render();
+      alert(e.message);
+    }
+  }
+}
+
+function toggleVehicleForm() {
+  const p = document.getElementById('vehicle-form');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function toggleGeneralAlertForm() {
+  const p = document.getElementById('general-alert-form');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveGeneralAlert() {
+  const title = document.getElementById('general-alert-title').value.trim();
+  const due = document.getElementById('general-alert-date').value;
+  const note = document.getElementById('general-alert-note').value.trim();
+  if (!title) { alert('أدخل اسم التنبيه'); return; }
+  if (!due) { alert('أدخل تاريخ التنبيه'); return; }
+  const item = { id: 'general_' + Date.now(), title, due, note };
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/general-alerts', { method: 'POST', body: JSON.stringify(item) });
+      generalAlerts.unshift(res.data);
+    } catch(e) {
+      generalAlerts.unshift(item);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً');
+    }
+  } else {
+    generalAlerts.unshift(item);
+  }
+  saveGeneralAlerts();
+  ['general-alert-title','general-alert-date','general-alert-note'].forEach(id => document.getElementById(id).value = '');
+  toggleGeneralAlertForm();
+  showMsg('✅ تم حفظ التنبيه العام');
+  render();
+}
+
+async function removeGeneralAlert(id) {
+  if (!confirm('حذف هذا التنبيه؟')) return;
+  const old = generalAlerts.slice();
+  generalAlerts = generalAlerts.filter(x => x.id !== id);
+  saveGeneralAlerts();
+  render();
+  if (apiOnline && id && !id.startsWith('general_')) {
+    try {
+      await apiRequest('/general-alerts/delete', { method: 'POST', body: JSON.stringify({ id }) });
+    } catch(e) {
+      generalAlerts = old;
+      saveGeneralAlerts();
+      render();
+      alert(e.message);
+    }
+  }
+}
+
+async function saveVehicleTask() {
+  const name = document.getElementById('vehicle-name').value.trim();
+  const type = document.getElementById('vehicle-type').value;
+  const due = document.getElementById('vehicle-due').value;
+  const odometer = document.getElementById('vehicle-odometer').value.trim();
+  if (!name) { alert('أدخل اسم السيارة'); return; }
+  if (!due) { alert('أدخل تاريخ الاستحقاق'); return; }
+  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer };
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/vehicle-tasks', { method: 'POST', body: JSON.stringify(item) });
+      vehicles.unshift(res.data);
+    } catch(e) {
+      vehicles.unshift(item);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً');
+    }
+  } else {
+    vehicles.unshift(item);
+  }
+  saveVehicles();
+  ['vehicle-name','vehicle-due','vehicle-odometer'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('vehicle-type').value = 'تغيير زيت';
+  toggleVehicleForm();
+  showMsg('✅ تم حفظ تنبيه السيارة');
+  render();
+}
+
+async function removeVehicleTask(id) {
+  if (!confirm('حذف هذا التنبيه؟')) return;
+  const old = vehicles.slice();
+  vehicles = vehicles.filter(x => x.id !== id);
+  saveVehicles();
+  render();
+  if (apiOnline && id && !id.startsWith('vehicle_') && !id.startsWith('vehicle_seed_')) {
+    try {
+      await apiRequest('/vehicle-tasks/delete', { method: 'POST', body: JSON.stringify({ id }) });
+    } catch(e) {
+      vehicles = old;
+      saveVehicles();
+      render();
+      alert(e.message);
+    }
+  }
+}
+
+function toggleTenderForm() {
+  const p = document.getElementById('tender-form');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') hydrateTenderKeywordSelect();
+}
+
+async function saveTender() {
+  const title = document.getElementById('tender-title').value.trim();
+  const entity = document.getElementById('tender-entity').value.trim();
+  const due = document.getElementById('tender-due').value;
+  const score = document.getElementById('tender-score').value;
+  const platform = document.getElementById('tender-platform').value;
+  const keyword = document.getElementById('tender-keyword').value;
+  const url = document.getElementById('tender-url').value.trim();
+  const reason = document.getElementById('tender-reason').value.trim();
+  if (!title) { alert('أدخل عنوان المنافسة'); return; }
+  const item = { id: 'tender_' + Date.now(), title, entity, due, score, platform, keyword, url: url || '#', reason };
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/tenders', { method: 'POST', body: JSON.stringify(item) });
+      tenders.unshift(res.data);
+    } catch(e) {
+      tenders.unshift(item);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً');
+    }
+  } else {
+    tenders.unshift(item);
+  }
+  saveTenders();
+  ['tender-title','tender-entity','tender-due','tender-url','tender-reason'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('tender-score').value = 'تحتاج مراجعة';
+  document.getElementById('tender-platform').value = 'اعتماد';
+  toggleTenderForm();
+  showMsg('✅ تم حفظ المنافسة');
+  render();
+}
+
+function hydrateTenderKeywordSelect() {
+  const el = document.getElementById('tender-keyword');
+  if (!el) return;
+  el.innerHTML = TENDER_KEYWORDS.map(k => `<option>${k}</option>`).join('');
+}
+
+function openTenderPlatform(platformId) {
+  const p = TENDER_PLATFORMS.find(x => x.id === platformId);
+  if (p) window.open(p.url, '_blank');
+}
+
+function openTenderSearch(platformId, keywordIndex) {
+  const p = TENDER_PLATFORMS.find(x => x.id === platformId);
+  const keyword = TENDER_KEYWORDS[keywordIndex];
+  if (!p || !keyword) return;
+  const query = p.site ? `${keyword} site:${p.site}` : `${keyword} مناقصة OR منافسة OR فرصة OR توريد OR تأجير`;
+  window.open('https://www.google.com/search?q=' + encodeURIComponent(query), '_blank');
+}
+
+function openAllTenderSearches(keywordIndex) {
+  TENDER_PLATFORMS.forEach(p => openTenderSearch(p.id, keywordIndex));
+}
+
+function tenderMatchesProduct(t) {
+  const text = [t.title, t.reason, t.keyword].filter(Boolean).join(' ').toLowerCase();
+  return TENDER_KEYWORDS.some(k => text.includes(k.toLowerCase()));
+}
+
+async function setTenderScore(id, score) {
+  const idx = tenders.findIndex(t => t.id === id);
+  const item = tenders[idx];
+  if (!item) return;
+  const old = { ...item };
+  item.score = score;
+  saveTenders();
+  render();
+  if (apiOnline && id && !id.startsWith('tender_')) {
+    try {
+      const res = await apiRequest('/tenders/status', { method: 'POST', body: JSON.stringify({ id, score }) });
+      tenders[idx] = res.data;
+      saveTenders();
+      render();
+    } catch(e) {
+      tenders[idx] = old;
+      saveTenders();
+      render();
+      alert(e.message);
+    }
+  }
+}
+
+async function removeTender(id) {
+  if (!confirm('حذف هذه المنافسة؟')) return;
+  const old = tenders.slice();
+  tenders = tenders.filter(t => t.id !== id);
+  saveTenders();
+  render();
+  if (apiOnline && id && !id.startsWith('tender_')) {
+    try {
+      await apiRequest('/tenders/delete', { method: 'POST', body: JSON.stringify({ id }) });
+    } catch(e) {
+      tenders = old;
+      saveTenders();
+      render();
+      alert(e.message);
+    }
+  }
+}
+
+function periodEntries(days) {
+  const min = new Date();
+  min.setDate(min.getDate() - days);
+  return financeEntries.filter(e => new Date(e.created) >= min);
+}
+
+function financeTotals(entries = financeEntries) {
+  const incomeTypes = new Set(['إيراد']);
+  const outTypes = new Set(['مصروف','عهدة','سلفة']);
+  const debtTypes = new Set(['دين']);
+  return entries.reduce((a, e) => {
+    if (incomeTypes.has(e.type)) a.income += e.amount;
+    if (outTypes.has(e.type)) a.out += e.amount;
+    if (debtTypes.has(e.type)) a.debt += e.amount;
+    if (e.type === 'عهدة') a.custody += e.amount;
+    return a;
+  }, { income: 0, out: 0, debt: 0, custody: 0 });
+}
+function approvedFinanceEntries() {
+  return financeEntries.filter(e => e.status === 'approved');
+}
+function draftFinanceEntries() {
+  return financeEntries.filter(e => (e.status || 'draft') === 'draft');
+}
+
+function statusPill(text, color) {
+  return `<span class="badge" style="background:${color}22;color:${color};border:0.5px solid ${color}55">${text}</span>`;
+}
+function financeStatusLabel(status) {
+  return ({ draft: 'مسودة', approved: 'معتمدة', rejected: 'مرفوضة' })[status || 'draft'] || status;
+}
+function financeStatusColor(status) {
+  return status === 'approved' ? '#5DCAA5' : status === 'rejected' ? '#E24B4A' : '#FAC775';
+}
+
+function renderExecutive() {
+  const el = document.getElementById('executive-dashboard');
+  if (!el) return;
+  const confirmedRevenue = clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0);
+  const receivables = clients.filter(isConfirmedSale).reduce((s,c)=>s+(c.remaining||0),0);
+  const pendingQuotes = clients.filter(isActiveFollowupQuote);
+  const unbilledConfirmed = clients.filter(c => isConfirmedSale(c) && !isTaxInvoice(c));
+  const upcomingInstalls = clients.filter(c => daysUntil(c.installDate) !== null && daysUntil(c.installDate) >= 0).sort((a,b)=>new Date(a.installDate)-new Date(b.installDate)).slice(0,5);
+  const week = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
+  const draftCount = draftFinanceEntries().length;
+  const urgentStaff = staffDocs.filter(x => { const d = daysUntil(x.expires); return d !== null && d <= 30; });
+  const urgentVehicles = vehicles.filter(x => { const d = daysUntil(x.due); return d !== null && d <= 30; });
+  const kpi = [
+    ['دخل التأجير المؤكد', money(confirmedRevenue), '#5DCAA5'],
+    ['المتبقي للتحصيل', money(receivables), '#FAC775'],
+    ['عروض تحتاج متابعة', pendingQuotes.length, '#EF9F27'],
+    ['مصروفات 7 أيام', money(week.out), '#E24B4A']
+  ];
+  const row = (title, sub, badge) => `<div class="list-row"><div><div style="font-weight:600">${title}</div><div class="text-secondary" style="margin-top:3px">${sub}</div></div><div>${badge||''}</div></div>`;
+  el.innerHTML = `
+    <div class="kpi-grid">${kpi.map(([l,v,c]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:700;color:${c}">${v}</div></div>`).join('')}</div>
+    <div class="dashboard-grid">
+      <div>
+        <div class="section">
+          <div class="flex-between mb-12"><div style="font-size:15px;font-weight:600">المهم اليوم</div><button class="btn-secondary" onclick="showDailyPanel()">تفاصيل</button></div>
+          ${pendingQuotes.slice(0,4).map(c => row('متابعة عرض: ' + c.name, money(c.offerPrice) + (c.phone ? ' — ' + c.phone : ''), statusPill('متابعة', '#FAC775'))).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد عروض معلقة</div>'}
+          ${unbilledConfirmed.slice(0,3).map(c => row('عرض مؤكد غير مفوتر: ' + c.name, money(c.offerPrice), statusPill('دخل تأجير', '#5DCAA5'))).join('')}
+          ${draftCount && can('approveFinance') ? row('حركات مالية تحتاج اعتماد', draftCount + ' حركة بانتظار المراجعة', statusPill('اعتماد', '#E24B4A')) : ''}
+        </div>
+        <div class="section">
+          <div class="flex-between mb-12"><div style="font-size:15px;font-weight:600">التركيبات القادمة</div><button class="btn-secondary" onclick="setTab('ops')">عرض</button></div>
+          ${upcomingInstalls.map(c => row(c.name, (c.installDate || 'بدون تاريخ') + ' — ' + (c.location || 'بدون موقع'), statusPill(daysUntil(c.installDate) === 0 ? 'اليوم' : 'بعد ' + daysUntil(c.installDate) + ' يوم', '#85B7EB'))).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد تركيبات قادمة</div>'}
+        </div>
+      </div>
+      <div>
+        <div class="section">
+          <div style="font-size:15px;font-weight:600;margin-bottom:10px">إدخال سريع</div>
+          <div class="quick-grid">
+            ${['مصروف','عهدة','إيراد','سلفة','دين','تحويل'].map(t => `<button class="btn-secondary" onclick="openQuickEntry('${t}')">${t}</button>`).join('')}
+          </div>
+        </div>
+        <div class="section">
+          <div class="flex-between mb-12"><div style="font-size:15px;font-weight:600">تنبيهات المؤسسة</div><button class="btn-secondary" onclick="setTab('assets')">عرض</button></div>
+          ${urgentStaff.map(x => row(x.name, x.type + ' ينتهي في ' + x.expires, statusPill('بعد ' + daysUntil(x.expires) + ' يوم', '#E24B4A'))).join('')}
+          ${urgentVehicles.map(x => row(x.name, x.type + ' في ' + x.due, statusPill('بعد ' + daysUntil(x.due) + ' يوم', '#EF9F27'))).join('')}
+          ${!urgentStaff.length && !urgentVehicles.length ? '<div class="text-secondary" style="font-size:12px">لا توجد تنبيهات قريبة</div>' : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderFinance() {
+  const approved = approvedFinanceEntries();
+  const drafts = draftFinanceEntries();
+  const sum = financeTotals(approved);
+  const allSum = financeTotals();
+  const week = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
+  const summary = document.getElementById('finance-summary');
+  if (summary) summary.innerHTML = [
+    ['إيرادات معتمدة', money(sum.income), 'success'],
+    ['مصروفات معتمدة', money(sum.out), 'warning'],
+    ['مسودات تحتاج اعتماد', drafts.length, 'danger'],
+    ['عهد مفتوحة', money(allSum.custody), 'info'],
+  ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:18px;font-weight:700;color:${t==='success'?'#5DCAA5':t==='warning'?'#FAC775':t==='danger'?'#E24B4A':'#85B7EB'}">${v}</div></div>`).join('');
+  const list = document.getElementById('finance-list');
+  if (list) list.innerHTML = `
+    ${drafts.length && can('approveFinance') ? `
+      <div style="background:#1f0e0e;border:0.5px solid #E24B4A55;border-radius:8px;padding:10px 12px;margin:10px 0">
+        <div style="font-size:13px;font-weight:700;color:#E24B4A;margin-bottom:3px">حركات بانتظار الاعتماد</div>
+        <div class="text-secondary" style="font-size:12px">راجعها ثم اختر اعتماد أو رفض. لا تدخل في التقارير المعتمدة قبل الاعتماد.</div>
+      </div>` : ''}
+    ${financeEntries.length ? financeEntries.slice(0,25).map(e => `
+    <div class="list-row">
+      <div>
+        <div style="font-weight:600">${e.type} — ${money(e.amount)}</div>
+        <div class="text-secondary" style="margin-top:3px">${e.note}</div>
+        <div class="text-secondary" style="margin-top:3px">${new Date(e.created).toLocaleString('ar-SA')} — ${e.account}${e.category ? ' — ' + e.category : ''}${e.person ? ' — ' + e.person : ''}${e.attachment ? ' — مرفق: ' + e.attachment : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${statusPill(financeStatusLabel(e.status), financeStatusColor(e.status))}
+        ${can('approveFinance') && e.status !== 'approved' ? `<button class="btn-secondary" onclick="setFinanceStatus('${e.id}', 'approved')">اعتماد</button>` : ''}
+        ${can('approveFinance') && e.status !== 'rejected' ? `<button class="btn-secondary" onclick="setFinanceStatus('${e.id}', 'rejected')">رفض</button>` : ''}
+      </div>
+    </div>`).join('') : '<div class="text-secondary" style="font-size:12px;padding:8px 0">لا توجد حركات مالية بعد</div>'}`;
+  const reports = document.getElementById('reports-view');
+  if (reports) reports.innerHTML = `
+    <div class="grid-2">
+      <div class="stat-card"><div class="label">إيرادات آخر 7 أيام</div><div style="font-size:20px;color:#5DCAA5;font-weight:700">${money(week.income)}</div></div>
+      <div class="stat-card"><div class="label">مصروفات آخر 7 أيام</div><div style="font-size:20px;color:#FAC775;font-weight:700">${money(week.out)}</div></div>
+      <div class="stat-card"><div class="label">حركات بانتظار الاعتماد</div><div style="font-size:20px;color:#E24B4A;font-weight:700">${drafts.length}</div></div>
+      <div class="stat-card"><div class="label">ديون/التزامات مسجلة</div><div style="font-size:20px;color:#FAC775;font-weight:700">${money(allSum.debt)}</div></div>
+      <div class="stat-card"><div class="label">دخل التأجير المؤكد</div><div style="font-size:20px;color:#5DCAA5;font-weight:700">${money(clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0))}</div></div>
+      <div class="stat-card"><div class="label">فواتير ضريبية</div><div style="font-size:20px;color:#85B7EB;font-weight:700">${money(clients.filter(isTaxInvoice).reduce((s,c)=>s+c.offerPrice,0))}</div></div>
+    </div>`;
+}
+
+function renderOperations() {
+  const install = document.getElementById('install-list');
+  if (install) {
+    const rows = clients
+      .filter(c => c.installDate && c.stage !== 'استغنى' && isConfirmedSale(c))
+      .sort((a,b)=>new Date(a.installDate)-new Date(b.installDate));
+    install.innerHTML = rows.length ? rows.map(c => {
+        const d = daysUntil(c.installDate);
+        const label = d === 0 ? 'اليوم' : d === 1 ? 'غداً' : d !== null ? 'بعد ' + d + ' يوم' : 'بدون مدة';
+        const color = d === 0 ? '#E24B4A' : d !== null && d <= 2 ? '#EF9F27' : '#85B7EB';
+        return `<div class="list-row">
+          <div>
+            <div style="font-weight:600">${c.name}</div>
+            <div class="text-secondary" style="margin-top:3px">${c.products || '—'} — ${c.location || 'بدون موقع'}</div>
+            <div class="text-secondary" style="margin-top:3px">${LABELS[c.stage] || c.stage} — ${isTaxInvoice(c) ? 'فاتورة ضريبية' : 'عرض مؤكد'}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            ${statusPill(c.installDate + ' / ' + label, color)}
+            <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
+          </div>
+        </div>`;
+      }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مواعيد تركيب مؤكدة مسجلة</div>';
+  }
+}
+
+function renderAssetsAndTenders() {
+  const general = document.getElementById('general-alerts');
+  if (general) general.innerHTML = generalAlerts.length ? generalAlerts
+    .slice()
+    .sort((a,b) => new Date(a.due) - new Date(b.due))
+    .map(x => {
+      const d = daysUntil(x.due);
+      const color = d !== null && d <= 7 ? '#E24B4A' : d !== null && d <= 30 ? '#EF9F27' : '#5DCAA5';
+      return `<div class="list-row">
+        <div>
+          <div style="font-weight:600">${x.title}</div>
+          <div class="text-secondary" style="margin-top:3px">${x.due}${x.note ? ' — ' + x.note : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${statusPill(d === null ? 'بدون مدة' : d < 0 ? 'متأخر' : 'بعد ' + d + ' يوم', color)}
+          ${can('assetManage') ? `<button class="btn-secondary" onclick="removeGeneralAlert('${x.id || ''}')">حذف</button>` : ''}
+        </div>
+      </div>`;
+    }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد تنبيهات عامة</div>';
+  const staff = document.getElementById('staff-alerts');
+  if (staff) staff.innerHTML = staffDocs.length ? staffDocs
+    .slice()
+    .sort((a,b) => new Date(a.expires) - new Date(b.expires))
+    .map(x => {
+      const d = daysUntil(x.expires);
+      const color = d !== null && d <= 30 ? '#E24B4A' : d !== null && d <= 60 ? '#EF9F27' : '#5DCAA5';
+      return `<div class="list-row">
+        <div>
+          <div style="font-weight:600">${x.name}</div>
+          <div class="text-secondary" style="margin-top:3px">${x.type} — ${x.expires}${x.note ? ' — ' + x.note : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${statusPill(d === null ? 'بدون مدة' : 'بعد ' + d + ' يوم', color)}
+          ${can('assetManage') ? `<button class="btn-secondary" onclick="removeStaffDoc('${x.id || ''}')">حذف</button>` : ''}
+        </div>
+      </div>`;
+    }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد تنبيهات موظفين</div>';
+  const veh = document.getElementById('vehicle-alerts');
+  if (veh) veh.innerHTML = vehicles.length ? vehicles
+    .slice()
+    .sort((a,b) => new Date(a.due) - new Date(b.due))
+    .map(x => {
+      const d = daysUntil(x.due);
+      const color = d !== null && d <= 30 ? '#EF9F27' : '#5DCAA5';
+      return `<div class="list-row">
+        <div>
+          <div style="font-weight:600">${x.name}</div>
+          <div class="text-secondary" style="margin-top:3px">${x.type} — ${x.due}${x.odometer ? ' — ' + x.odometer : ''}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${statusPill(d === null ? 'بدون مدة' : 'بعد ' + d + ' يوم', color)}
+          ${can('assetManage') ? `<button class="btn-secondary" onclick="removeVehicleTask('${x.id || ''}')">حذف</button>` : ''}
+        </div>
+      </div>`;
+    }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد تنبيهات سيارات</div>';
+  const tender = document.getElementById('tender-list');
+  const tenderPlatforms = document.getElementById('tender-platforms');
+  if (tenderPlatforms) tenderPlatforms.innerHTML = `
+    <div class="tender-chip-grid">
+      ${TENDER_PLATFORMS.map(p => `<button class="btn-secondary" onclick="openTenderPlatform('${p.id}')">${p.name}</button>`).join('')}
+    </div>
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد للمنافسات الحكومية، تنافس لمشتريات القطاع غير الربحي، فرص للفرص الاستثمارية والبلدية، فرص الترفيه للفعاليات، وبحث الإنترنت لأي مصدر خارجي.</div>`;
+  const tenderKeywords = document.getElementById('tender-keywords');
+  if (tenderKeywords) tenderKeywords.innerHTML = `
+    <div class="tender-chip-grid">
+      ${TENDER_KEYWORDS.map((k, i) => `<span class="tender-chip">${k}</span>`).join('')}
+    </div>
+    <div class="tender-chip-grid">
+      ${TENDER_KEYWORDS.slice(0, 6).map((k, i) => `<button class="btn-sync" onclick="openAllTenderSearches(${i})">بحث: ${k}</button>`).join('')}
+    </div>`;
+  if (tender) tender.innerHTML = tenders.map(t => {
+    const color = t.score === 'مناسبة' ? '#5DCAA5' : t.score === 'غير مناسبة' ? '#E24B4A' : '#FAC775';
+    const match = tenderMatchesProduct(t);
+    const linkBtn = t.url && t.url !== '#'
+      ? `<button class="btn-secondary" onclick="window.open('${t.url}')">الرابط</button>`
+      : `<button class="btn-secondary" onclick="showMsg('لا يوجد رابط محفوظ لهذه المنافسة')">الرابط</button>`;
+    return `<div class="list-row">
+      <div>
+        <div style="font-weight:600">${t.title}</div>
+        <div class="text-secondary" style="margin-top:3px">${t.entity || 'جهة غير محددة'}${t.due ? ' — آخر موعد ' + t.due : ''}${t.platform ? ' — ' + t.platform : ''}</div>
+        ${t.url && t.url !== '#' ? `<div class="text-secondary" style="margin-top:3px">المصدر: ${t.platform || 'رابط خارجي'} — ${t.url}</div>` : ''}
+        ${t.keyword ? `<div class="text-secondary" style="margin-top:3px">الكلمة: ${t.keyword}</div>` : ''}
+        <div class="text-secondary" style="margin-top:3px">${t.reason || 'بدون سبب تقييم'}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${match ? statusPill('مطابق للخيام', '#85B7EB') : ''}
+        ${statusPill(t.score, color)}
+        ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'مناسبة')">مناسبة</button>` : ''}
+        ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'غير مناسبة')">غير مناسبة</button>` : ''}
+        ${linkBtn}
+        ${can('tenders') ? `<button class="btn-secondary" onclick="removeTender('${t.id}')">حذف</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function advance(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
-  const idx = STAGES.indexOf(c.stage);
-  if (idx < STAGES.length - 1) c.stage = STAGES[idx + 1];
+  const idx = WORKFLOW_STAGES.indexOf(c.stage);
+  if (idx >= 0 && idx < WORKFLOW_STAGES.length - 1) c.stage = WORKFLOW_STAGES[idx + 1];
+  if (c.stage !== 'عرض_سعر') c.quoteConfirmed = true;
+  if (isTaxInvoice(c)) c.taxInvoiceIssued = true;
+  saveClientState(c);
+  saveClients();
   closeModal(); render();
 }
 
@@ -459,7 +1880,9 @@ function showModal(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
   const days = daysUntil(c.installDate);
-  const nextStage = STAGES[STAGES.indexOf(c.stage)+1];
+  const nextStage = WORKFLOW_STAGES[WORKFLOW_STAGES.indexOf(c.stage)+1];
+  const taxInvoice = isTaxInvoice(c);
+  const confirmed = isConfirmedSale(c);
   document.getElementById('modal-content').innerHTML = `
     <div class="flex-between mb-12">
       <div>
@@ -468,11 +1891,24 @@ function showModal(id) {
       </div>
       <span class="badge" style="background:${COLORS[c.stage]};color:${CTXT[c.stage]}">${LABELS[c.stage]}</span>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div style="background:${confirmed?'#061a12':'#1a1100'};border:0.5px solid ${confirmed?'#5DCAA550':'#FAC77550'};border-radius:8px;padding:8px 10px">
+        <div class="label">حالة عرض السعر</div>
+        <div style="font-size:13px;color:${confirmed?'#5DCAA5':'#FAC775'};font-weight:600">${confirmed?'مؤكد - دخل تأجير':'غير مؤكد'}</div>
+      </div>
+      <div style="background:${taxInvoice?'#061a12':'#13161f'};border:0.5px solid ${taxInvoice?'#5DCAA550':'#2e3244'};border-radius:8px;padding:8px 10px">
+        <div class="label">الفاتورة الضريبية</div>
+        <div style="font-size:13px;color:${taxInvoice?'#5DCAA5':'#9a9898'};font-weight:600">${taxInvoice?'صادرة':'غير محسوبة ضريبياً'}</div>
+      </div>
+    </div>
     ${[['الجوال',c.phone],['المنتجات',c.products],['الموقع',c.location],['المسؤول',c.assignedTo],['تاريخ التركيب',c.installDate||'لم يحدد'],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
     <div style="background:#13161f;border-radius:8px;padding:10px 12px;margin:12px 0">
       ${[['الإجمالي',c.offerPrice.toLocaleString()+' ر.س'],['دفعة أولى',c.deposit.toLocaleString()+' ر.س'],['دفعة ثانية',c.remaining.toLocaleString()+' ر.س']].map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:3px 0"><span class="text-secondary">${k}</span><span class="text-success" style="font-weight:500">${v}</span></div>`).join('')}
     </div>
     <div class="flex gap-8" style="flex-wrap:wrap">
+      ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
+      ${!taxInvoice && c.stage !== 'استغنى' ? `<button class="btn-secondary" style="flex:1;color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>` : ''}
+      ${c.stage === 'استغنى' ? `<button class="btn-secondary" style="flex:1" onclick="reopenQuote('${c.id}')">إرجاع للمتابعة</button>` : ''}
       ${nextStage ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
       ${c.phone ? `<button class="btn-green" style="flex:1" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name} 👋\\nتواصل معك فريق واحة الخيمة 🏕️'))">واتساب</button>` : ''}
       <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>
@@ -482,7 +1918,102 @@ function showModal(id) {
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 
+function renderClientOverview() {
+  const pendingEl = document.getElementById('pending-quotes-list');
+  const pendingCount = document.getElementById('pending-quotes-count');
+  const monthlyEl = document.getElementById('monthly-jobs-list');
+  const monthlyCount = document.getElementById('monthly-jobs-count');
+  if (!pendingEl || !monthlyEl) return;
+
+  const pending = clients
+    .filter(isActiveFollowupQuote)
+    .sort((a, b) => new Date(a.created || '2100-01-01') - new Date(b.created || '2100-01-01'));
+
+  pendingCount.textContent = pending.length;
+  pendingEl.innerHTML = pending.length ? pending.map(c => {
+    const old = daysOld(c.created);
+    const followText = old === null ? 'يحتاج متابعة' : old <= 0 ? 'وصل اليوم' : 'منذ ' + old + ' يوم';
+    return `<div class="card followup-card" style="margin-bottom:8px">
+      <div class="flex-between mb-8" style="gap:10px">
+        <div>
+          <div style="font-size:14px;font-weight:700">${c.name || 'عميل'}</div>
+          <div class="text-secondary" style="font-size:11px;margin-top:3px">${c.daftraNo ? 'عرض #' + c.daftraNo + ' — ' : ''}${c.created || 'بدون تاريخ'}</div>
+        </div>
+        <span class="badge" style="background:#E24B4A;color:#fff">${followText}</span>
+      </div>
+      <div class="flex-between" style="gap:10px;margin-bottom:8px">
+        <span style="font-size:13px;color:#E24B4A;font-weight:700">${money(c.offerPrice)}</span>
+        <span class="text-secondary" style="font-size:11px">${c.location || 'بدون موقع'}</span>
+      </div>
+      <div class="flex gap-6" style="flex-wrap:wrap">
+        ${c.phone ? `<button class="btn-green" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name || ''} 👋\\nمعك واحة الخيمة، نتابع معك عرض السعر المرسل لكم.'))">واتساب</button>` : ''}
+        <button class="btn-primary" onclick="setQuoteConfirmed('${c.id}', true)">تأكيد العرض</button>
+        <button class="btn-secondary" style="color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>
+        <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد عروض سعر تنتظر المتابعة</div>';
+
+  const quoteRows = clients
+    .filter(c => c.created)
+    .sort((a, b) => new Date(b.created) - new Date(a.created));
+  monthlyCount.textContent = quoteRows.length;
+
+  const groups = quoteRows.reduce((acc, c) => {
+    const key = monthKey(c.created);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(c);
+    return acc;
+  }, {});
+  const monthHtml = Object.keys(groups).sort().reverse().map(key => {
+    const rows = groups[key];
+    return `<div class="month-group">
+      <div class="month-head">
+        <div style="font-size:13px;font-weight:700">${monthLabel(key)}</div>
+        <span class="badge" style="background:#1a3a5c;color:#85B7EB">${rows.length}</span>
+      </div>
+      <div style="padding:0 12px">
+        ${rows.map(c => {
+          const needsFollow = isActiveFollowupQuote(c);
+          const oldFollow = isOldFollowupQuote(c);
+          const status = needsFollow ? 'يحتاج متابعة' : oldFollow ? 'متابعة سابقة' : c.stage === 'استغنى' ? 'استغنى' : isTaxInvoice(c) ? 'فاتورة' : isConfirmedSale(c) ? 'مؤكد' : (LABELS[c.stage] || c.stage);
+          const statusColor = needsFollow ? '#E24B4A' : oldFollow ? '#9a9898' : c.stage === 'استغنى' ? '#9a9898' : isTaxInvoice(c) ? '#85B7EB' : isConfirmedSale(c) ? '#5DCAA5' : '#FAC775';
+          return `<div class="list-row">
+            <div>
+              <div style="font-weight:700">${c.name || 'عميل'}</div>
+              <div class="text-secondary" style="margin-top:3px">تاريخ العرض: ${c.created}${c.daftraNo ? ' — #' + c.daftraNo : ''}</div>
+              <div class="text-secondary" style="margin-top:3px">${c.products || '—'} — ${c.location || 'بدون موقع'}</div>
+              ${c.installDate ? `<div class="text-secondary" style="margin-top:3px">موعد التركيب: ${c.installDate}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+              ${statusPill(status, statusColor)}
+              ${statusPill(money(c.offerPrice), '#5DCAA5')}
+              ${needsFollow && c.phone ? `<button class="btn-green" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name || ''} 👋\\nمعك واحة الخيمة، نتابع معك عرض السعر المرسل لكم.'))">واتساب</button>` : ''}
+              ${needsFollow ? `<button class="btn-primary" onclick="setQuoteConfirmed('${c.id}', true)">تأكيد</button>` : ''}
+              ${needsFollow ? `<button class="btn-secondary" style="color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">استغنى</button>` : ''}
+              <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  const noDate = clients.filter(c => !c.created);
+  const noDateHtml = noDate.length ? `<div style="margin-top:10px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:#FAC775">عروض بدون تاريخ عرض</div>
+    ${noDate.map(c => `<div class="list-row">
+      <div>
+        <div style="font-weight:700">${c.name || 'عميل'}</div>
+        <div class="text-secondary" style="margin-top:3px">${LABELS[c.stage] || c.stage} — ${money(c.offerPrice)}</div>
+      </div>
+      <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
+    </div>`).join('')}
+  </div>` : '';
+  monthlyEl.innerHTML = monthHtml || noDateHtml ? monthHtml + noDateHtml : '<div class="text-secondary" style="font-size:12px">لا توجد عروض أسعار بتاريخ مسجل</div>';
+}
+
 function render() {
+  renderClientOverview();
   // كانبان
   const kanban = document.getElementById('kanban');
   kanban.innerHTML = STAGES.map(s => {
@@ -499,7 +2030,7 @@ function render() {
           return `<div class="card client-card" style="border-color:${urgent?'#EF9F27':'#2e3244'}" onclick="showModal('${c.id}')">
             <div class="flex-between mb-8">
               <span style="font-size:13px;font-weight:500">${c.name}</span>
-              <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${c.source==='daftra'?'#1a2e1a':'#1a1a2e'};color:${c.source==='daftra'?'#5DCAA5':'#85B7EB'}">${c.source==='daftra'?'دفترة':'يدوي'}</span>
+              <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${isConfirmedSale(c)?'#0d2a1b':c.source==='daftra'?'#1a2e1a':'#1a1a2e'};color:${isConfirmedSale(c)?'#5DCAA5':c.source==='daftra'?'#5DCAA5':'#85B7EB'}">${isTaxInvoice(c)?'فاتورة':isConfirmedSale(c)?'مؤكد':c.source==='daftra'?'دفترة':'يدوي'}</span>
             </div>
             ${c.daftraNo?`<div style="font-size:11px;color:#5DCAA5;margin-bottom:3px">#${c.daftraNo}</div>`:''}
             <div class="flex-between">
@@ -515,7 +2046,7 @@ function render() {
   // تنبيهات
   const notifs = clients.flatMap(c => {
     const a = [];
-    if (c.stage === 'عرض_سعر') a.push({type:'warning',text:'متابعة موافقة العميل: '+c.name,phone:c.phone});
+    if (isActiveFollowupQuote(c)) a.push({type:'warning',text:'متابعة موافقة العميل: '+c.name,phone:c.phone});
     if (c.stage === 'فاتورة_صادرة') {
       const accKey = 'acc_' + c.id;
       accWaMsgs[accKey] = [
@@ -574,13 +2105,19 @@ function render() {
     </div>`).join('') : '<div style="font-size:12px;color:#9a9898">لا توجد تنبيهات</div>';
 
   // إحصاءات
+  const confirmedRevenue = clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0);
+  const taxInvoiceRevenue = clients.filter(isTaxInvoice).reduce((s,c)=>s+c.offerPrice,0);
   document.getElementById('stats').innerHTML = [
     ['العملاء', clients.length, ''],
-    ['إجمالي العقود', clients.reduce((s,c)=>s+c.offerPrice,0).toLocaleString()+' ر.س', ''],
-    ['من دفترة', clients.filter(c=>c.source==='daftra').length, 'success'],
-    ['انتظار موافقة', clients.filter(c=>c.stage==='عرض_سعر').length, 'warning'],
-  ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:500;color:${t==='warning'?'#FAC775':t==='success'?'#5DCAA5':'#e8e6e1'}">${v}</div></div>`).join('');
+    ['دخل التأجير المؤكد', confirmedRevenue.toLocaleString()+' ر.س', 'success'],
+    ['فواتير ضريبية', taxInvoiceRevenue.toLocaleString()+' ر.س', 'info'],
+    ['انتظار موافقة', clients.filter(isActiveFollowupQuote).length, 'warning'],
+  ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:500;color:${t==='warning'?'#FAC775':t==='success'?'#5DCAA5':t==='info'?'#85B7EB':'#e8e6e1'}">${v}</div></div>`).join('');
   renderDashboard();
+  renderExecutive();
+  renderFinance();
+  renderOperations();
+  renderAssetsAndTenders();
 }
 
 function showMsg(t) {
@@ -590,6 +2127,14 @@ function showMsg(t) {
 }
 
 function toggleSettings() {
+  if (activeTab !== 'clients') {
+    showMsg('⚠️ إعدادات دفترة داخل تبويب العملاء فقط');
+    return;
+  }
+  if (!can('settings')) {
+    showMsg('⚠️ إعدادات دفترة متاحة لحساب بندر فقط');
+    return;
+  }
   const p = document.getElementById('settings-panel');
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
   if (p.style.display === 'block') loadConfigUI();
@@ -604,13 +2149,31 @@ function toggleAdd() {
 }
 
 // تحميل أولي
-render();
-if (cfg.subdomain && cfg.apikey && cfg.proxyUrl) {
-  showDailyPanel();
-  syncDaftra();
-  syncTimer = setInterval(syncDaftra, 60000);
-} else {
-  toggleSettings();
+async function boot() {
+  applyTheme();
+  registerServiceWorker();
+  renderUserStatus();
+  render();
+  applyPermissions();
+  if (shouldShowLoginScreen()) showLoginScreen();
+  await loadAppData();
+  render();
+  applyPermissions();
+  if (shouldShowLoginScreen()) showLoginScreen(); else hideLoginScreen();
+  await hydrateConfig();
+  if (hasConfig()) {
+    showMsg('✅ إعدادات دفترة جاهزة. افتح تبويب العملاء للمزامنة');
+  } else if (can('settings')) {
+    showMsg('⚠️ إعدادات دفترة تضبط من تبويب العملاء');
+  } else {
+    showMsg('⚠️ إعدادات دفترة تحتاج دخول بندر لإكمال الربط');
+  }
+}
+boot();
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 </script>
 </body>

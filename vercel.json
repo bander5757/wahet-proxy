@@ -2,10 +2,19 @@
   "version": 2,
   "builds": [
     { "src": "index.html", "use": "@vercel/static" },
-    { "src": "api/daftra.js", "use": "@vercel/node" }
+    { "src": "manifest.webmanifest", "use": "@vercel/static" },
+    { "src": "sw.js", "use": "@vercel/static" },
+    { "src": "icons/icon.svg", "use": "@vercel/static" },
+    { "src": "api/daftra.js", "use": "@vercel/node" },
+    { "src": "api/app.js", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/api/daftra", "dest": "/api/daftra.js" },
+    { "src": "/api/app/(.*)", "dest": "/api/app.js?path=/$1" },
+    { "src": "/api/app", "dest": "/api/app.js?path=/bootstrap" },
+    { "src": "/manifest.webmanifest", "dest": "/manifest.webmanifest" },
+    { "src": "/sw.js", "dest": "/sw.js" },
+    { "src": "/icons/icon.svg", "dest": "/icons/icon.svg" },
     { "src": "/(.*)", "dest": "/index.html" }
   ],
   "headers": [

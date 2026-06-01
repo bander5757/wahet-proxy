@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="واحة الخيمة">
+  <rect width="512" height="512" rx="96" fill="#0f1117"/>
+  <path d="M96 376h320L278 126c-9-16-31-16-40 0L96 376Z" fill="#85B7EB"/>
+  <path d="M144 376h224L268 194c-5-10-19-10-24 0L144 376Z" fill="#5DCAA5"/>
+  <path d="M256 164v212" stroke="#0f1117" stroke-width="22" stroke-linecap="round"/>
+  <path d="M118 376h276" stroke="#FAC775" stroke-width="28" stroke-linecap="round"/>
+  <path d="M188 400h136" stroke="#E8E6E1" stroke-width="18" stroke-linecap="round"/>
+</svg>
