@@ -721,6 +721,16 @@ async function loadAppData() {
       clientState = data.quoteStates;
       try { localStorage.setItem('wk_client_state', JSON.stringify(clientState)); } catch(e) {}
     }
+    if (Array.isArray(data.clients)) {
+      clients = data.clients.map(c => applyClientState(c));
+      saveClients();
+      if (data.daftraSync?.syncedAt) {
+        const lastSync = document.getElementById('last-sync');
+        if (lastSync) {
+          lastSync.textContent = 'آخر مزامنة مشتركة: ' + new Date(data.daftraSync.syncedAt).toLocaleString('ar-SA');
+        }
+      }
+    }
     showMsg('✅ قاعدة البيانات متصلة');
   } catch(e) {
     apiOnline = false;
@@ -1045,7 +1055,8 @@ async function syncDaftra() {
   if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ أدخل Subdomain ومفتاح دفترة أولاً'); return; }
   const proxyUrl = resolveDaftraProxyUrl(cfg.proxyUrl);
   showMsg('⏳ جاري المزامنة مع دفترة...');
-  document.getElementById('sync-btn').textContent = '⏳';
+  const syncBtn = document.getElementById('sync-btn');
+  if (syncBtn) syncBtn.textContent = '⏳';
   try {
     const post = async (ep) => {
       const res = await fetch(proxyUrl, {
@@ -1061,7 +1072,7 @@ async function syncDaftra() {
 
     const fetchPages = async base => {
       const rows = [];
-      for (let page = 1; page <= 5; page++) {
+      for (let page = 1; page <= 20; page++) {
         const data = await post(`${base}.json?limit=100&page=${page}`);
         const batch = data?.data || [];
         rows.push(...batch);
@@ -1082,7 +1093,10 @@ async function syncDaftra() {
 
     estimates.forEach(e => {
       const est = e.Estimate || e;
-      const hasInv = invoices.some(i => (i.Invoice||i).client_id === est.client_id);
+      const hasInv = invoices.some(i => {
+        const inv = i.Invoice || i;
+        return String(inv.estimate_id || inv.estimateId || '') === String(est.id);
+      });
       if (!hasInv) {
         const card = {
           id: 'est_' + est.id, daftraEstId: est.id, daftraClientId: est.client_id,
@@ -1103,7 +1117,11 @@ async function syncDaftra() {
 
     invoices.forEach(inv => {
       const i = inv.Invoice || inv;
-      const ex = merged.find(c => c.daftraClientId === i.client_id);
+      const relatedEstimateId = i.estimate_id || i.estimateId || i.Estimate?.id || '';
+      const ex = merged.find(c =>
+        (relatedEstimateId && String(c.daftraEstId || '') === String(relatedEstimateId)) ||
+        (c.daftraInvId && String(c.daftraInvId) === String(i.id))
+      );
       const card = {
         ...(ex||{}), id: ex ? ex.id : 'inv_' + i.id,
         daftraInvId: i.id, daftraClientId: i.client_id,
@@ -1122,19 +1140,38 @@ async function syncDaftra() {
       applyClientState(card);
       card.quoteConfirmed = true;
       card.taxInvoiceIssued = true;
-      const idx = merged.findIndex(c => c.daftraClientId === card.daftraClientId);
+      const idx = merged.findIndex(c =>
+        (card.daftraInvId && String(c.daftraInvId || '') === String(card.daftraInvId)) ||
+        (relatedEstimateId && String(c.daftraEstId || '') === String(relatedEstimateId))
+      );
       if (idx >= 0) merged[idx] = card; else merged.push(card);
     });
 
     clients = merged;
     saveClients();
-    document.getElementById('last-sync').textContent = 'آخر مزامنة: ' + new Date().toLocaleTimeString('ar-SA');
+    const syncedAt = new Date().toISOString();
+    if (apiOnline) {
+      try {
+        await apiRequest('/clients-cache', {
+          method: 'POST',
+          body: JSON.stringify({
+            clients: merged,
+            syncedAt,
+            counts: { estimates: estimates.length, invoices: invoices.length }
+          })
+        });
+      } catch(e) {
+        showMsg('⚠️ تم الجلب، لكن تعذر حفظه كقائمة مشتركة في قاعدة البيانات');
+      }
+    }
+    const lastSync = document.getElementById('last-sync');
+    if (lastSync) lastSync.textContent = 'آخر مزامنة مشتركة: ' + new Date(syncedAt).toLocaleTimeString('ar-SA');
     showMsg('✅ تمت المزامنة — ' + estimates.length + ' عرض سعر، ' + invoices.length + ' فاتورة');
     render();
   } catch(err) {
     showMsg('❌ فشل الاتصال: ' + err.message);
   }
-  document.getElementById('sync-btn').textContent = '🔄 مزامنة';
+  if (syncBtn) syncBtn.textContent = '🔄 مزامنة';
 }
 
 function addClient() {

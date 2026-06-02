@@ -496,6 +496,32 @@ async function setSetting(client, key, value) {
   return result.rows[0].value;
 }
 
+async function getDaftraClientsCache(client) {
+  const cache = await getSetting(client, "daftra_clients_cache");
+  if (!cache || !Array.isArray(cache.clients)) {
+    return { clients: [], syncedAt: null, counts: { estimates: 0, invoices: 0 } };
+  }
+  return {
+    clients: cache.clients,
+    syncedAt: cache.syncedAt || null,
+    counts: cache.counts || { estimates: 0, invoices: 0 },
+  };
+}
+
+async function setDaftraClientsCache(client, payload) {
+  const clients = Array.isArray(payload.clients) ? payload.clients.slice(0, 1000) : [];
+  const counts = payload.counts && typeof payload.counts === "object" ? payload.counts : {};
+  const cache = {
+    clients,
+    syncedAt: payload.syncedAt || new Date().toISOString(),
+    counts: {
+      estimates: Number(counts.estimates) || 0,
+      invoices: Number(counts.invoices) || 0,
+    },
+  };
+  return setSetting(client, "daftra_clients_cache", cache);
+}
+
 function validateDaftraSettings(payload) {
   const proxyUrl = String(payload.proxyUrl || "").trim();
   const subdomain = String(payload.subdomain || "").trim();
@@ -611,6 +637,7 @@ async function dashboard(client, user) {
   const generalAlerts = await listGeneralAlerts(client);
   const tenders = await listTenders(client);
   const daftraSettings = await getSetting(client, "daftra");
+  const daftraClientsCache = await getDaftraClientsCache(client);
   const users = await client.query(
     "select id, name, phone, email, role, is_active from app_users where is_active = true order by created_at asc"
   );
@@ -623,6 +650,11 @@ async function dashboard(client, user) {
     vehicles,
     generalAlerts,
     tenders,
+    clients: daftraClientsCache.clients,
+    daftraSync: {
+      syncedAt: daftraClientsCache.syncedAt,
+      counts: daftraClientsCache.counts,
+    },
     settings: {
       daftra: daftraSettings,
     },
@@ -723,6 +755,15 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/settings/daftra") {
       const saved = await setSetting(client, "daftra", validateDaftraSettings(req.body || {}));
+      return res.status(200).json({ ok: true, data: saved });
+    }
+
+    if (req.method === "GET" && path === "/clients-cache") {
+      return res.status(200).json({ ok: true, data: await getDaftraClientsCache(client) });
+    }
+
+    if (req.method === "POST" && path === "/clients-cache") {
+      const saved = await setDaftraClientsCache(client, req.body || {});
       return res.status(200).json({ ok: true, data: saved });
     }
 
