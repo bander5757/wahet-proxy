@@ -446,9 +446,12 @@
     <div class="flex-between mb-12">
       <div>
         <div style="font-size:15px;font-weight:600">رادار المنافسات</div>
-        <div style="font-size:11px;color:#9a9898;margin-top:2px">رصد يومي للخيام الأوروبية في اعتماد وفرص</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">رصد يومي للخيام الأوروبية في اعتماد، تنافس، فرص، والإنترنت</div>
       </div>
-      <button class="btn-secondary" data-action="tenders" onclick="toggleTenderForm()">+ منافسة</button>
+      <div class="flex gap-6">
+        <button class="btn-sync" data-action="tenders" onclick="runTenderRadar()">تشغيل الرادار</button>
+        <button class="btn-secondary" data-action="tenders" onclick="toggleTenderForm()">+ فرصة</button>
+      </div>
     </div>
     <div class="tender-toolbox">
       <div class="stat-card">
@@ -460,14 +463,18 @@
         <div id="tender-keywords"></div>
       </div>
     </div>
+    <div id="tender-radar-results"></div>
     <div id="tender-form" style="display:none;margin-bottom:12px">
       <div class="grid-2">
-        <div><div class="label">عنوان المنافسة</div><input id="tender-title" type="text"></div>
+        <div><div class="label">عنوان الفرصة</div><input id="tender-title" type="text"></div>
         <div><div class="label">الجهة</div><input id="tender-entity" type="text"></div>
+        <div><div class="label">نوع الفرصة</div><select id="tender-type"><option value="tender">منافسة</option><option value="lead">عميل محتمل</option><option value="site">موقع/فرصة تشغيل</option><option value="event">فعالية</option></select></div>
         <div><div class="label">آخر موعد</div><input id="tender-due" type="date"></div>
         <div><div class="label">التقييم</div><select id="tender-score"><option>تحتاج مراجعة</option><option>مناسبة</option><option>غير مناسبة</option></select></div>
         <div><div class="label">المصدر</div><select id="tender-platform"><option>اعتماد</option><option>تنافس</option><option>فرص</option><option>فرص الترفيه</option><option>بحث الإنترنت</option><option>أخرى</option></select></div>
         <div><div class="label">الكلمة المطابقة</div><select id="tender-keyword"></select></div>
+        <div><div class="label">الإجراء المقترح</div><select id="tender-action"><option>مراجعة الرابط</option><option>اتصال</option><option>واتساب</option><option>تجهيز عرض سعر</option><option>تسجيل في المنصة</option><option>تجاهل</option></select></div>
+        <div><div class="label">حالة المتابعة</div><select id="tender-follow"><option value="new">جديدة</option><option value="reviewing">قيد المراجعة</option><option value="contacted">تم التواصل</option><option value="proposal">تم تجهيز عرض</option><option value="ignored">تم التجاهل</option><option value="done">منتهية</option></select></div>
         <div style="grid-column:1/-1"><div class="label">الرابط</div><input id="tender-url" type="url" placeholder="https://"></div>
         <div style="grid-column:1/-1"><div class="label">سبب التقييم</div><textarea id="tender-reason" rows="3"></textarea></div>
       </div>
@@ -767,14 +774,25 @@ const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage
 const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
 const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!followupDate(c) || followupDate(c) >= FOLLOWUP_START_DATE);
 const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && followupDate(c) && followupDate(c) < FOLLOWUP_START_DATE;
-const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام'];
+const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام','مهرجان خارجي','فعالية خارجية','منطقة استقبال','موقع مؤقت','تجهيز فعاليات','مخيم فاخر'];
+const TENDER_NEGATIVE_KEYWORDS = ['خيام رحلات','خيام بر','خيام أطفال','حراج','مستعملة','السنيدي','القاضي','خياط خيام','بيت شعر صغير','أرخص خيام','تفصيل خيام شعر'];
 const TENDER_PLATFORMS = [
-  { id: 'etimad', name: 'اعتماد', url: 'https://monafasat.etimad.sa/', site: 'monafasat.etimad.sa' },
+  { id: 'etimad', name: 'اعتماد', url: 'https://tenders.etimad.sa/Tender', site: 'tenders.etimad.sa', type: 'tender' },
   { id: 'tanafos', name: 'تنافس', url: 'https://tanafos.sa/', site: 'tanafos.sa' },
   { id: 'furas', name: 'فرص', url: 'https://furas.momah.gov.sa/ar', site: 'furas.momah.gov.sa' },
   { id: 'gea', name: 'فرص الترفيه', url: 'https://gea.gov.sa/initiatives/furas-platform/', site: 'gea.gov.sa' },
   { id: 'web', name: 'بحث الإنترنت', url: 'https://www.google.com/search?q=' + encodeURIComponent('خيام أوروبية مناقصة OR منافسة OR تأجير خيام'), site: '' }
 ];
+const MARKET_SEARCHES = [
+  { type: 'lead', name: 'منظمو فعاليات', query: 'منظم فعاليات مهرجان خارجي السعودية خيام OR ضيافة' },
+  { type: 'lead', name: 'قصور واستراحات', query: 'قصر مناسبات استراحة فعاليات خارجية السعودية خيام' },
+  { type: 'event', name: 'مهرجانات موسمية', query: 'مهرجان شتوي فعالية خارجية السعودية موقع مؤقت' },
+  { type: 'event', name: 'معارض ومزادات', query: 'معرض خارجي مزاد فعالية السعودية تجهيز خيام' },
+  { type: 'site', name: 'مواقع وفرص تشغيل', query: 'فرصة موقع مؤقت فعالية ترفيهية خيام السعودية' },
+  { type: 'lead', name: 'منتجعات ومخيمات فاخرة', query: 'منتجع مخيم فاخر السعودية فعاليات خيام أوروبية' }
+];
+const TENDER_TYPE_LABELS = { tender: 'منافسة', lead: 'عميل محتمل', site: 'موقع/تشغيل', event: 'فعالية' };
+const TENDER_FOLLOW_LABELS = { new: 'جديدة', reviewing: 'قيد المراجعة', contacted: 'تم التواصل', proposal: 'تم تجهيز عرض', ignored: 'تم التجاهل', done: 'منتهية' };
 const saveClients = () => {
   try { localStorage.setItem('wk_clients', JSON.stringify(clients)); } catch(e) {}
 };
@@ -1837,14 +1855,17 @@ function toggleTenderForm() {
 async function saveTender() {
   const title = document.getElementById('tender-title').value.trim();
   const entity = document.getElementById('tender-entity').value.trim();
+  const type = document.getElementById('tender-type').value;
   const due = document.getElementById('tender-due').value;
   const score = document.getElementById('tender-score').value;
   const platform = document.getElementById('tender-platform').value;
   const keyword = document.getElementById('tender-keyword').value;
+  const action = document.getElementById('tender-action').value;
+  const followStatus = document.getElementById('tender-follow').value;
   const url = document.getElementById('tender-url').value.trim();
   const reason = document.getElementById('tender-reason').value.trim();
-  if (!title) { alert('أدخل عنوان المنافسة'); return; }
-  const item = { id: 'tender_' + Date.now(), title, entity, due, score, platform, keyword, url: url || '#', reason };
+  if (!title) { alert('أدخل عنوان الفرصة'); return; }
+  const item = { id: 'tender_' + Date.now(), title, entity, type, due, score, platform, keyword, action, followStatus, url: url || '#', reason };
   if (apiOnline) {
     try {
       const res = await apiRequest('/tenders', { method: 'POST', body: JSON.stringify(item) });
@@ -1858,10 +1879,13 @@ async function saveTender() {
   }
   saveTenders();
   ['tender-title','tender-entity','tender-due','tender-url','tender-reason'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('tender-type').value = 'tender';
   document.getElementById('tender-score').value = 'تحتاج مراجعة';
   document.getElementById('tender-platform').value = 'اعتماد';
+  document.getElementById('tender-action').value = 'مراجعة الرابط';
+  document.getElementById('tender-follow').value = 'new';
   toggleTenderForm();
-  showMsg('✅ تم حفظ المنافسة');
+  showMsg('✅ تم حفظ الفرصة');
   render();
 }
 
@@ -1888,9 +1912,103 @@ function openAllTenderSearches(keywordIndex) {
   TENDER_PLATFORMS.forEach(p => openTenderSearch(p.id, keywordIndex));
 }
 
+function buildSearchUrl(query) {
+  return 'https://www.google.com/search?q=' + encodeURIComponent(query);
+}
+
+function tenderRadarQueries() {
+  const primary = TENDER_KEYWORDS.slice(0, 10).flatMap(keyword => (
+    TENDER_PLATFORMS.slice(0, 4).map(platform => {
+      const query = platform.site
+        ? `${keyword} site:${platform.site}`
+        : `${keyword} مناقصة OR منافسة OR فرصة OR توريد OR تأجير`;
+      return {
+        title: `${platform.name} - ${keyword}`,
+        platform: platform.name,
+        type: platform.id === 'furas' ? 'site' : platform.id === 'gea' ? 'event' : 'tender',
+        keyword,
+        query,
+        url: buildSearchUrl(query),
+        action: platform.id === 'etimad' || platform.id === 'tanafos' ? 'مراجعة الرابط' : 'اتصال',
+        reason: `بحث يومي عن ${keyword} في ${platform.name}`
+      };
+    })
+  ));
+  const market = MARKET_SEARCHES.map(item => ({
+    title: `بحث تسويقي - ${item.name}`,
+    platform: 'بحث الإنترنت',
+    type: item.type,
+    keyword: item.name,
+    query: item.query,
+    url: buildSearchUrl(item.query),
+    action: item.type === 'lead' ? 'اتصال' : 'مراجعة الرابط',
+    reason: `بحث عن ${item.name} قد يحتاجون تأجير الخيام الأوروبية`
+  }));
+  return [...primary, ...market];
+}
+
+function runTenderRadar() {
+  const today = new Date().toISOString().slice(0, 10);
+  const queries = tenderRadarQueries();
+  try {
+    localStorage.setItem('wk_tender_radar_date', today);
+    localStorage.setItem('wk_tender_radar_queries', JSON.stringify(queries));
+  } catch(e) {}
+  showMsg(`✅ تم تجهيز ${queries.length} مسار بحث لليوم`);
+  render();
+}
+
+function getTenderRadarQueries() {
+  try {
+    const raw = localStorage.getItem('wk_tender_radar_queries');
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) {
+    return [];
+  }
+}
+
+function openRadarQuery(index) {
+  const item = getTenderRadarQueries()[index];
+  if (item?.url) window.open(item.url, '_blank');
+}
+
+async function saveRadarCandidate(index) {
+  const item = getTenderRadarQueries()[index];
+  if (!item) return;
+  const candidate = {
+    id: 'tender_' + Date.now(),
+    title: item.title,
+    entity: item.platform,
+    type: item.type,
+    due: '',
+    score: 'تحتاج مراجعة',
+    platform: item.platform,
+    keyword: item.keyword,
+    action: item.action,
+    followStatus: 'new',
+    url: item.url,
+    reason: item.reason,
+  };
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/tenders', { method: 'POST', body: JSON.stringify(candidate) });
+      tenders.unshift(res.data);
+    } catch(e) {
+      tenders.unshift(candidate);
+      showMsg('⚠️ تم حفظ الفرصة محلياً فقط');
+    }
+  } else {
+    tenders.unshift(candidate);
+  }
+  saveTenders();
+  showMsg('✅ تم تحويل مسار البحث إلى بطاقة متابعة');
+  render();
+}
+
 function tenderMatchesProduct(t) {
   const text = [t.title, t.reason, t.keyword].filter(Boolean).join(' ').toLowerCase();
-  return TENDER_KEYWORDS.some(k => text.includes(k.toLowerCase()));
+  const negative = TENDER_NEGATIVE_KEYWORDS.some(k => text.includes(k.toLowerCase()));
+  return !negative && TENDER_KEYWORDS.some(k => text.includes(k.toLowerCase()));
 }
 
 async function setTenderScore(id, score) {
@@ -2435,15 +2553,53 @@ function renderAssetsAndTenders() {
     <div class="tender-chip-grid">
       ${TENDER_PLATFORMS.map(p => `<button class="btn-secondary" onclick="openTenderPlatform('${p.id}')">${p.name}</button>`).join('')}
     </div>
-    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد للمنافسات الحكومية، تنافس لمشتريات القطاع غير الربحي، فرص للفرص الاستثمارية والبلدية، فرص الترفيه للفعاليات، وبحث الإنترنت لأي مصدر خارجي.</div>`;
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد للمنافسات الحكومية، تنافس لمشتريات القطاع غير الربحي، فرص للفرص الاستثمارية والبلدية، فرص الترفيه للفعاليات، وبحث الإنترنت للعملاء المحتملين.</div>`;
   const tenderKeywords = document.getElementById('tender-keywords');
   if (tenderKeywords) tenderKeywords.innerHTML = `
     <div class="tender-chip-grid">
       ${TENDER_KEYWORDS.map((k, i) => `<span class="tender-chip">${k}</span>`).join('')}
     </div>
+    <div class="text-secondary" style="font-size:11px;margin-top:8px">يتم استبعاد: ${TENDER_NEGATIVE_KEYWORDS.slice(0, 8).join('، ')}</div>
     <div class="tender-chip-grid">
       ${TENDER_KEYWORDS.slice(0, 6).map((k, i) => `<button class="btn-sync" onclick="openAllTenderSearches(${i})">بحث: ${k}</button>`).join('')}
     </div>`;
+  const radarBox = document.getElementById('tender-radar-results');
+  if (radarBox) {
+    const radarDate = (() => { try { return localStorage.getItem('wk_tender_radar_date') || ''; } catch(e) { return ''; } })();
+    const queries = getTenderRadarQueries();
+    radarBox.innerHTML = `
+      <div class="section" style="margin-bottom:12px">
+        <div class="flex-between mb-12">
+          <div>
+            <div style="font-size:14px;font-weight:600">إيجنت البحث اليومي</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر تشغيل: ' + radarDate : 'اضغط تشغيل الرادار لتجهيز بحث اليوم'}</div>
+          </div>
+          <div class="flex gap-6">
+            <button class="btn-secondary" onclick="runTenderRadar()">تحديث البحث</button>
+            ${queries[0] ? `<button class="btn-sync" onclick="openRadarQuery(0)">افتح أول بحث</button>` : ''}
+          </div>
+        </div>
+        ${queries.length ? `
+          <div class="grid-2">
+            ${queries.slice(0, 10).map((q, i) => `
+              <div class="stat-card">
+                <div class="flex-between mb-8">
+                  <div style="font-weight:600;font-size:13px">${q.title}</div>
+                  ${statusPill(TENDER_TYPE_LABELS[q.type] || 'فرصة', q.type === 'lead' ? '#85B7EB' : q.type === 'event' ? '#FAC775' : '#5DCAA5')}
+                </div>
+                <div class="text-secondary" style="font-size:11px;line-height:1.7">${q.reason}</div>
+                <div class="text-secondary" style="font-size:11px;margin-top:6px">الإجراء: ${q.action}</div>
+                <div class="flex gap-6 mt-8">
+                  <button class="btn-secondary" onclick="openRadarQuery(${i})">فتح البحث</button>
+                  ${can('tenders') ? `<button class="btn-primary" onclick="saveRadarCandidate(${i})">أضف للمتابعة</button>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          ${queries.length > 10 ? `<div class="text-secondary" style="font-size:11px;margin-top:8px">تم تجهيز ${queries.length} مسار. يظهر أول 10 لتسهيل المتابعة اليومية.</div>` : ''}
+        ` : '<div class="text-secondary" style="font-size:12px">لم يتم تجهيز بحث اليوم بعد.</div>'}
+      </div>`;
+  }
   if (tender) tender.innerHTML = tenders.map(t => {
     const color = t.score === 'مناسبة' ? '#5DCAA5' : t.score === 'غير مناسبة' ? '#E24B4A' : '#FAC775';
     const match = tenderMatchesProduct(t);
@@ -2453,14 +2609,16 @@ function renderAssetsAndTenders() {
     return `<div class="list-row">
       <div>
         <div style="font-weight:600">${t.title}</div>
-        <div class="text-secondary" style="margin-top:3px">${t.entity || 'جهة غير محددة'}${t.due ? ' — آخر موعد ' + t.due : ''}${t.platform ? ' — ' + t.platform : ''}</div>
+        <div class="text-secondary" style="margin-top:3px">${TENDER_TYPE_LABELS[t.type] || 'منافسة'} — ${t.entity || 'جهة غير محددة'}${t.due ? ' — آخر موعد ' + t.due : ''}${t.platform ? ' — ' + t.platform : ''}</div>
         ${t.url && t.url !== '#' ? `<div class="text-secondary" style="margin-top:3px">المصدر: ${t.platform || 'رابط خارجي'} — ${t.url}</div>` : ''}
         ${t.keyword ? `<div class="text-secondary" style="margin-top:3px">الكلمة: ${t.keyword}</div>` : ''}
+        ${t.action ? `<div class="text-secondary" style="margin-top:3px">الإجراء المقترح: ${t.action}</div>` : ''}
         <div class="text-secondary" style="margin-top:3px">${t.reason || 'بدون سبب تقييم'}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         ${match ? statusPill('مطابق للخيام', '#85B7EB') : ''}
         ${statusPill(t.score, color)}
+        ${statusPill(TENDER_FOLLOW_LABELS[t.followStatus] || 'جديدة', '#9a9898')}
         ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'مناسبة')">مناسبة</button>` : ''}
         ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'غير مناسبة')">غير مناسبة</button>` : ''}
         ${linkBtn}

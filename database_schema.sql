@@ -167,12 +167,23 @@ create table if not exists tenders (
   source_name text,
   source_url text,
   matched_keyword text,
+  opportunity_type text not null default 'tender'
+    check (opportunity_type in ('tender', 'lead', 'site', 'event')),
   due_on date,
   fit_status text not null default 'review' check (fit_status in ('fit', 'not_fit', 'review')),
   fit_reason text,
   decision text,
+  suggested_action text,
+  follow_status text not null default 'new'
+    check (follow_status in ('new', 'reviewing', 'contacted', 'proposal', 'ignored', 'done')),
+  last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table tenders add column if not exists opportunity_type text not null default 'tender';
+alter table tenders add column if not exists suggested_action text;
+alter table tenders add column if not exists follow_status text not null default 'new';
+alter table tenders add column if not exists last_seen_at timestamptz not null default now();
 
 create index if not exists idx_rental_quotes_status on rental_quotes(quote_status);
 create index if not exists idx_rental_quotes_install_date on rental_quotes(install_date);

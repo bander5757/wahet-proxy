@@ -172,10 +172,14 @@ function tenderRow(row) {
     platform: row.source_name || "",
     url: row.source_url || "#",
     keyword: row.matched_keyword || "",
+    type: row.opportunity_type || "tender",
     due: row.due_on || "",
     score: TENDER_STATUS_LABELS[row.fit_status] || "تحتاج مراجعة",
     reason: row.fit_reason || "",
     decision: row.decision || "",
+    action: row.suggested_action || "",
+    followStatus: row.follow_status || "new",
+    lastSeen: row.last_seen_at,
     created: row.created_at,
   };
 }
@@ -468,7 +472,8 @@ async function deleteGeneralAlert(client, id) {
 async function listTenders(client) {
   const result = await client.query(`
     select id, title, entity_name, source_name, source_url, matched_keyword,
-           due_on::text, fit_status, fit_reason, decision, created_at
+           opportunity_type, due_on::text, fit_status, fit_reason, decision,
+           suggested_action, follow_status, last_seen_at, created_at
     from tenders
     order by created_at desc
     limit 200
@@ -485,19 +490,25 @@ async function createTender(client, payload) {
   }
   const result = await client.query(
     `insert into tenders
-      (title, entity_name, source_name, source_url, matched_keyword, due_on, fit_status, fit_reason)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
+      (title, entity_name, source_name, source_url, matched_keyword, opportunity_type,
+       due_on, fit_status, fit_reason, suggested_action, follow_status, decision)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      returning id, title, entity_name, source_name, source_url, matched_keyword,
-               due_on::text, fit_status, fit_reason, decision, created_at`,
+               opportunity_type, due_on::text, fit_status, fit_reason, decision,
+               suggested_action, follow_status, last_seen_at, created_at`,
     [
       title,
       payload.entity || payload.entity_name || null,
       payload.platform || payload.source_name || null,
       payload.url || payload.source_url || null,
       payload.keyword || payload.matched_keyword || null,
+      payload.type || payload.opportunity_type || "tender",
       payload.due || payload.due_on || null,
       TENDER_STATUS_MAP[payload.score] || payload.fit_status || "review",
       payload.reason || payload.fit_reason || null,
+      payload.action || payload.suggested_action || null,
+      payload.followStatus || payload.follow_status || "new",
+      payload.decision || null,
     ]
   );
   return tenderRow(result.rows[0]);
@@ -516,7 +527,8 @@ async function updateTenderScore(client, payload) {
      set fit_status = $1
      where id = $2
      returning id, title, entity_name, source_name, source_url, matched_keyword,
-               due_on::text, fit_status, fit_reason, decision, created_at`,
+               opportunity_type, due_on::text, fit_status, fit_reason, decision,
+               suggested_action, follow_status, last_seen_at, created_at`,
     [status, id]
   );
   if (!result.rows[0]) {
