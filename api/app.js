@@ -575,6 +575,34 @@ async function setDaftraClientsCache(client, payload) {
   return setSetting(client, "daftra_clients_cache", cache);
 }
 
+async function getBankStatementCache(client) {
+  const cache = await getSetting(client, "bank_statement_cache");
+  if (!cache || !Array.isArray(cache.rows)) {
+    return { rows: [], month: null, fileName: "", sourceType: "", savedAt: null, analysis: null };
+  }
+  return {
+    rows: cache.rows.slice(0, 2000),
+    month: cache.month || null,
+    fileName: cache.fileName || "",
+    sourceType: cache.sourceType || "",
+    savedAt: cache.savedAt || null,
+    analysis: cache.analysis || null,
+  };
+}
+
+async function setBankStatementCache(client, payload) {
+  const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, 2000) : [];
+  const cache = {
+    rows,
+    month: payload.month || null,
+    fileName: String(payload.fileName || "").slice(0, 240),
+    sourceType: String(payload.sourceType || "").slice(0, 40),
+    savedAt: payload.savedAt || new Date().toISOString(),
+    analysis: payload.analysis || null,
+  };
+  return setSetting(client, "bank_statement_cache", cache);
+}
+
 async function syncDaftraClientsCache(client) {
   const cfg = await getSetting(client, "daftra");
   if (!cfg?.subdomain || !cfg?.apikey) {
@@ -829,6 +857,7 @@ async function dashboard(client, user) {
   const tenders = await listTenders(client);
   const daftraSettings = await getSetting(client, "daftra");
   const daftraClientsCache = await getDaftraClientsCache(client);
+  const bankStatement = await getBankStatementCache(client);
   const users = await client.query(
     "select id, name, phone, email, role, is_active from app_users where is_active = true order by created_at asc"
   );
@@ -846,6 +875,7 @@ async function dashboard(client, user) {
       syncedAt: daftraClientsCache.syncedAt,
       counts: daftraClientsCache.counts,
     },
+    bankStatement,
     settings: {
       daftra: daftraSettings,
     },
@@ -968,6 +998,15 @@ module.exports = async function handler(req, res) {
           clientsCount: Array.isArray(saved.clients) ? saved.clients.length : 0,
         },
       });
+    }
+
+    if (req.method === "GET" && path === "/bank-statement") {
+      return res.status(200).json({ ok: true, data: await getBankStatementCache(client) });
+    }
+
+    if (req.method === "POST" && path === "/bank-statement") {
+      const saved = await setBankStatementCache(client, req.body || {});
+      return res.status(200).json({ ok: true, data: saved });
     }
 
     if (req.method === "POST" && path === "/finance") {

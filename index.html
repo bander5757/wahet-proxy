@@ -355,8 +355,9 @@
       </div>
       <div class="grid-2">
         <div>
-          <div class="label">رفع كشف البنك CSV</div>
-          <input id="bank-file" type="file" accept=".csv,.txt" onchange="loadBankFile(event)">
+          <div class="label">رفع كشف البنك CSV / PDF</div>
+          <input id="bank-file" type="file" accept=".csv,.txt,.pdf,application/pdf" onchange="loadBankFile(event)">
+          <div class="text-secondary" style="font-size:11px;margin-top:4px">CSV يقرأ مباشرة. PDF يتم حفظ اسمه للتتبع، واستخراج بنوده يحتاج تحويل/استخراج نص في المرحلة التالية.</div>
         </div>
         <div>
           <div class="label">الشهر</div>
@@ -601,6 +602,8 @@ let financeEntries = [];
 try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
 let bankStatementRows = [];
 try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
+let bankStatementMeta = {};
+try { bankStatementMeta = JSON.parse(localStorage.getItem('wk_bank_statement_meta') || '{}'); } catch(e) { bankStatementMeta = {}; }
 let lastAccountingReport = '';
 let staffDocs = [];
 try { staffDocs = JSON.parse(localStorage.getItem('wk_staff_docs') || '[]'); } catch(e) { staffDocs = []; }
@@ -721,6 +724,7 @@ const saveFinance = () => {
 };
 const saveBankStatement = () => {
   try { localStorage.setItem('wk_bank_statement_rows', JSON.stringify(bankStatementRows)); } catch(e) {}
+  try { localStorage.setItem('wk_bank_statement_meta', JSON.stringify(bankStatementMeta || {})); } catch(e) {}
 };
 const saveStaffDocs = () => {
   try { localStorage.setItem('wk_staff_docs', JSON.stringify(staffDocs)); } catch(e) {}
@@ -800,6 +804,17 @@ async function loadAppData() {
           lastSync.textContent = 'آخر مزامنة مشتركة: ' + new Date(data.daftraSync.syncedAt).toLocaleString('ar-SA');
         }
       }
+    }
+    if (data.bankStatement && Array.isArray(data.bankStatement.rows)) {
+      bankStatementRows = data.bankStatement.rows;
+      bankStatementMeta = {
+        month: data.bankStatement.month || '',
+        fileName: data.bankStatement.fileName || '',
+        sourceType: data.bankStatement.sourceType || '',
+        savedAt: data.bankStatement.savedAt || '',
+        analysis: data.bankStatement.analysis || null
+      };
+      saveBankStatement();
     }
     showMsg('✅ قاعدة البيانات متصلة');
   } catch(e) {
@@ -1963,21 +1978,40 @@ function parseBankStatement(text) {
 function loadBankFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  bankStatementMeta = {
+    ...(bankStatementMeta || {}),
+    fileName: file.name,
+    sourceType: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/csv'),
+    savedAt: new Date().toISOString()
+  };
+  if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+    saveBankStatement();
+    renderSmartAccounting();
+    showMsg('📄 تم تسجيل ملف PDF. لاستخراج البنود بدقة نحتاج تحويله إلى CSV أو إضافة محرك قراءة PDF في المرحلة التالية');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => {
     document.getElementById('bank-text').value = String(reader.result || '');
+    bankStatementMeta.sourceType = 'csv';
     runSmartAccounting();
   };
   reader.readAsText(file);
 }
 
-function clearBankStatement() {
+async function clearBankStatement() {
   bankStatementRows = [];
+  bankStatementMeta = {};
   saveBankStatement();
   const text = document.getElementById('bank-text');
   const file = document.getElementById('bank-file');
   if (text) text.value = '';
   if (file) file.value = '';
+  if (apiOnline) {
+    try {
+      await apiRequest('/bank-statement', { method: 'POST', body: JSON.stringify({ rows: [], month: null, fileName: '', sourceType: '', analysis: null }) });
+    } catch(e) {}
+  }
   renderSmartAccounting();
 }
 
@@ -2044,21 +2078,67 @@ function buildAccountingAnalysis() {
   };
 }
 
-function runSmartAccounting() {
+function accountingAnalysisSnapshot(a) {
+  return {
+    quarter: a.qr,
+    outputVat: a.outputVat,
+    inputVatEstimate: a.inputVatEstimate,
+    netVat: a.netVat,
+    invoicesCount: a.quarterInvoices.length,
+    unbilledConfirmedCount: a.quarterConfirmedUnbilled.length,
+    expensesCount: a.quarterExpenses.length,
+    matchedBankCount: a.matchedBank.length,
+    unmatchedBankCount: a.unmatchedBank.length,
+    risks: a.risks,
+    report: lastAccountingReport,
+  };
+}
+
+async function persistBankStatement(analysis) {
+  bankStatementMeta = {
+    ...(bankStatementMeta || {}),
+    month: document.getElementById('bank-month')?.value || bankStatementMeta.month || new Date().toISOString().slice(0, 7),
+    savedAt: new Date().toISOString(),
+    analysis,
+  };
+  saveBankStatement();
+  if (!apiOnline) return false;
+  try {
+    await apiRequest('/bank-statement', {
+      method: 'POST',
+      body: JSON.stringify({
+        rows: bankStatementRows,
+        month: bankStatementMeta.month,
+        fileName: bankStatementMeta.fileName || '',
+        sourceType: bankStatementMeta.sourceType || '',
+        savedAt: bankStatementMeta.savedAt,
+        analysis,
+      })
+    });
+    return true;
+  } catch(e) {
+    showMsg('⚠️ تم تحليل كشف البنك محلياً، وتعذر حفظه في قاعدة البيانات');
+    return false;
+  }
+}
+
+async function runSmartAccounting() {
   const text = document.getElementById('bank-text')?.value || '';
   if (text.trim()) {
     bankStatementRows = parseBankStatement(text);
+    bankStatementMeta = { ...(bankStatementMeta || {}), sourceType: 'text', savedAt: new Date().toISOString() };
     saveBankStatement();
   }
   renderSmartAccounting();
-  showMsg('✅ تم تحليل المحاسب الذكي');
+  const saved = await persistBankStatement(accountingAnalysisSnapshot(buildAccountingAnalysis()));
+  showMsg(saved ? '✅ تم تحليل وحفظ المحاسب الذكي في قاعدة البيانات' : '✅ تم تحليل المحاسب الذكي');
 }
 
 function renderSmartAccounting() {
   const el = document.getElementById('smart-accounting-view');
   if (!el) return;
   const month = document.getElementById('bank-month');
-  if (month && !month.value) month.value = new Date().toISOString().slice(0, 7);
+  if (month && !month.value) month.value = bankStatementMeta.month || new Date().toISOString().slice(0, 7);
   const a = buildAccountingAnalysis();
   lastAccountingReport = [
     'تقرير المحاسب الذكي - واحة الخيمة',
@@ -2071,6 +2151,11 @@ function renderSmartAccounting() {
     'تنبيهات: ' + (a.risks.join('، ') || 'لا توجد تنبيهات كبيرة'),
   ].join('\n');
   el.innerHTML = `
+    ${bankStatementMeta?.fileName || bankStatementMeta?.savedAt ? `<div style="background:#f7fafc;border:0.5px solid #d8e0e7;border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:12px">
+      <div style="font-weight:700">آخر كشف محفوظ</div>
+      <div class="text-secondary" style="margin-top:3px">${bankStatementMeta.fileName ? 'الملف: ' + htmlEscape(bankStatementMeta.fileName) + ' — ' : ''}${bankStatementMeta.month ? 'الشهر: ' + bankStatementMeta.month + ' — ' : ''}${bankStatementMeta.savedAt ? 'آخر حفظ: ' + new Date(bankStatementMeta.savedAt).toLocaleString('ar-SA') : ''}</div>
+      ${bankStatementMeta.sourceType?.includes('pdf') || bankStatementMeta.fileName?.toLowerCase().endsWith('.pdf') ? '<div class="text-secondary" style="margin-top:3px;color:#EF9F27">ملف PDF محفوظ للتتبع. التحليل الرقمي يحتاج CSV أو نص مستخرج من الكشف.</div>' : ''}
+    </div>` : ''}
     <div class="grid-4">
       <div class="stat-card"><div class="label">ضريبة مبيعات تقديرية</div><div style="font-size:18px;color:#5DCAA5;font-weight:700">${money(a.outputVat)}</div></div>
       <div class="stat-card"><div class="label">ضريبة مشتريات تقديرية</div><div style="font-size:18px;color:#85B7EB;font-weight:700">${money(a.inputVatEstimate)}</div></div>
