@@ -161,8 +161,8 @@
         <select id="screen-login-identifier"><option>ابو فايز المدير</option><option>بندر</option><option>المشرف</option><option>المحاسب</option></select>
       </div>
       <div>
-        <div class="label">الكود</div>
-        <input id="screen-login-code" type="password" inputmode="numeric" placeholder="****">
+        <div class="label">كلمة المرور</div>
+        <input id="screen-login-code" type="password" autocomplete="current-password" placeholder="كلمة المرور">
       </div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#9a9898;margin:8px 0 14px">
@@ -172,7 +172,7 @@
     <button class="btn-primary" style="width:100%;padding:12px" onclick="loginUserFromScreen()">دخول</button>
     <button class="btn-secondary" style="width:100%;padding:10px;margin-top:8px" onclick="continueLocalPreview()">دخول تجريبي محلي</button>
     <div class="text-secondary" style="font-size:11px;margin-top:12px;line-height:1.7">
-      عند ربط قاعدة البيانات سيتم التحقق من الكود وحفظ الجلسة تلقائيا عند اختيار تذكرني.
+      عند ربط قاعدة البيانات سيتم التحقق من كلمة المرور وحفظ الجلسة تلقائيا عند اختيار تذكرني.
     </div>
   </div>
 </div>
@@ -482,13 +482,13 @@
     <div class="flex-between mb-12">
       <div>
         <div style="font-size:15px;font-weight:600">دخول المستخدم</div>
-        <div style="font-size:11px;color:#9a9898;margin-top:2px">اختر اسمك وأدخل الكود</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">اختر اسمك وأدخل كلمة المرور</div>
       </div>
       <button class="btn-secondary" onclick="closeLogin()">إغلاق</button>
     </div>
     <div class="grid-2" style="margin-bottom:10px">
       <div><div class="label">المستخدم</div><select id="login-identifier"><option>ابو فايز المدير</option><option>بندر</option><option>المشرف</option><option>المحاسب</option></select></div>
-      <div><div class="label">الكود</div><input id="login-code" type="password" inputmode="numeric" placeholder="****"></div>
+      <div><div class="label">كلمة المرور</div><input id="login-code" type="password" autocomplete="current-password" placeholder="كلمة المرور"></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#9a9898;margin:8px 0 14px">
       <input id="remember-login" type="checkbox" checked style="width:auto">
@@ -801,11 +801,11 @@ function normalizeLoginIdentifier(value) {
   })[value] || value;
 }
 async function loginWithValues(identifier, code, remember) {
-  if (!code) { alert('أدخل الكود'); return false; }
+  if (!code) { alert('أدخل كلمة المرور'); return false; }
   if (!apiOnline) {
     const localCodes = { 'بندر':'1111', 'ابو فايز':'Hamad1122', 'عمر':'waha1111', 'صدام':'waha2222' };
     if (localCodes[identifier] && localCodes[identifier] !== code) {
-      alert('الكود غير صحيح');
+      alert('كلمة المرور غير صحيحة');
       return false;
     }
     const localRoles = { 'بندر':'owner', 'ابو فايز':'viewer', 'عمر':'supervisor', 'صدام':'accountant' };
