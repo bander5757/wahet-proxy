@@ -563,6 +563,7 @@ let cfg = {};
 try { cfg = JSON.parse(localStorage.getItem('wk_cfg_v2') || localStorage.getItem('wk_cfg') || '{}'); } catch(e) {}
 cfg = Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra' }, cfg);
 let syncTimer = null;
+const loadingDaftraDetails = new Set();
 const omarWaMsgs = {};
 const accWaMsgs  = {};
 const dismissed  = new Set();
@@ -609,6 +610,34 @@ const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : nu
 const daysOld   = d => d ? Math.floor((new Date() - new Date(d)) / 86400000) : null;
 const money = n => (Number(n) || 0).toLocaleString() + ' ر.س';
 const FOLLOWUP_START_DATE = '2026-06-01';
+const dateOnly = value => value ? String(value).slice(0, 10) : '';
+const firstDate = (...values) => values.map(dateOnly).find(Boolean) || '';
+const followupDate = c => c.followupDate || c.updatedAt || c.created || '';
+const htmlEscape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[ch]));
+const daftraItemsFrom = (record, wrapper) => {
+  const candidates = [
+    wrapper?.EstimateItem, wrapper?.EstimateItems, wrapper?.InvoiceItem, wrapper?.InvoiceItems,
+    record?.EstimateItem, record?.EstimateItems, record?.InvoiceItem, record?.InvoiceItems,
+    record?.items, record?.line_items, record?.details
+  ];
+  const items = candidates.find(Array.isArray) || [];
+  return items.map(item => item.EstimateItem || item.InvoiceItem || item).map(item => ({
+    name: item.item || item.name || item.product_name || item.description || item.item_name || 'بند',
+    description: item.description || item.details || '',
+    quantity: item.quantity || item.qty || '',
+    unitPrice: item.unit_price || item.price || item.unitPrice || '',
+    tax: item.tax1 || item.tax || item.tax_value || '',
+    total: item.total || item.subtotal || item.line_total || ''
+  }));
+};
+const daftraDetailsFrom = (record, wrapper) => ({
+  status: record.status || record.state || '',
+  clientName: record.client_business_name || record.client_first_name || record.client_name || '',
+  clientPhone: record.client_phone || '',
+  notes: record.notes || record.note || record.description || '',
+  terms: record.terms || record.terms_conditions || '',
+  items: daftraItemsFrom(record, wrapper)
+});
 const monthKey = d => d ? d.slice(0, 7) : '';
 const monthLabel = key => {
   if (!key) return 'بدون شهر';
@@ -636,8 +665,8 @@ function closeSideMenu() {
 }
 const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب' || c.stage === 'مكتمل');
 const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
-const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!c.created || c.created >= FOLLOWUP_START_DATE);
-const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && c.created && c.created < FOLLOWUP_START_DATE;
+const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!followupDate(c) || followupDate(c) >= FOLLOWUP_START_DATE);
+const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && followupDate(c) && followupDate(c) < FOLLOWUP_START_DATE;
 const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام'];
 const TENDER_PLATFORMS = [
   { id: 'etimad', name: 'اعتماد', url: 'https://monafasat.etimad.sa/', site: 'monafasat.etimad.sa' },
@@ -1093,6 +1122,9 @@ async function syncDaftra() {
 
     estimates.forEach(e => {
       const est = e.Estimate || e;
+      const created = firstDate(est.date, est.created_at, est.created);
+      const updatedAt = firstDate(est.updated_at, est.modified, est.modified_at, est.last_modified, est.last_update, est.date);
+      const total = parseFloat(est.summary_total || est.total || 0);
       const hasInv = invoices.some(i => {
         const inv = i.Invoice || i;
         return String(inv.estimate_id || inv.estimateId || '') === String(est.id);
@@ -1102,12 +1134,14 @@ async function syncDaftra() {
           id: 'est_' + est.id, daftraEstId: est.id, daftraClientId: est.client_id,
         name: est.client_business_name || est.client_first_name || 'عميل',
         phone: est.client_phone || '', products: '—', location: est.client_state || '',
-        offerPrice: parseFloat(est.summary_total || 0),
-        deposit: Math.round(parseFloat(est.summary_total || 0) / 2),
-        remaining: Math.round(parseFloat(est.summary_total || 0) / 2),
+        offerPrice: total,
+        deposit: Math.round(total / 2),
+        remaining: Math.round(total / 2),
         quoteConfirmed: false, taxInvoiceIssued: false,
         stage: 'عرض_سعر', installDate: '', notes: '', assignedTo: '—',
-        created: (est.date||'').slice(0,10), source: 'daftra', daftraNo: est.no
+        created, updatedAt, followupDate: updatedAt || created,
+        source: 'daftra', daftraNo: est.no,
+        daftraDetails: daftraDetailsFrom(est, e)
         };
         applyClientState(card);
         if (card.quoteConfirmed && card.stage === 'عرض_سعر') card.stage = 'موافق';
@@ -1118,6 +1152,9 @@ async function syncDaftra() {
     invoices.forEach(inv => {
       const i = inv.Invoice || inv;
       const relatedEstimateId = i.estimate_id || i.estimateId || i.Estimate?.id || '';
+      const created = firstDate(i.date, i.created_at, i.created);
+      const updatedAt = firstDate(i.updated_at, i.modified, i.modified_at, i.last_modified, i.last_update, i.date);
+      const total = parseFloat(i.summary_total || i.total || 0);
       const ex = merged.find(c =>
         (relatedEstimateId && String(c.daftraEstId || '') === String(relatedEstimateId)) ||
         (c.daftraInvId && String(c.daftraInvId) === String(i.id))
@@ -1128,14 +1165,16 @@ async function syncDaftra() {
         name: i.client_business_name || i.client_first_name || ex?.name || 'عميل',
         phone: i.client_phone || ex?.phone || '',
         products: ex?.products || '—', location: i.client_state || ex?.location || '',
-        offerPrice: parseFloat(i.summary_total || 0),
-        deposit: Math.round(parseFloat(i.summary_total||0)/2),
-        remaining: Math.round(parseFloat(i.summary_total||0)/2),
+        offerPrice: total,
+        deposit: Math.round(total / 2),
+        remaining: Math.round(total / 2),
         quoteConfirmed: true, taxInvoiceIssued: true,
         stage: ex?.stage === 'تم_التركيب' || ex?.stage === 'مكتمل' ? ex.stage : 'فاتورة_صادرة',
         installDate: ex?.installDate || '', notes: ex?.notes || '',
         assignedTo: ex?.assignedTo || '—',
-        created: (i.date||'').slice(0,10), source: 'daftra', daftraNo: i.no
+        created, updatedAt, followupDate: updatedAt || created,
+        source: 'daftra', daftraNo: i.no,
+        daftraDetails: daftraDetailsFrom(i, inv)
       };
       applyClientState(card);
       card.quoteConfirmed = true;
@@ -1172,6 +1211,46 @@ async function syncDaftra() {
     showMsg('❌ فشل الاتصال: ' + err.message);
   }
   if (syncBtn) syncBtn.textContent = '🔄 مزامنة';
+}
+
+async function loadDaftraRecordDetails(id) {
+  const c = clients.find(x => x.id === id);
+  if (!c || c.source !== 'daftra' || loadingDaftraDetails.has(id)) return;
+  if (c.daftraDetails?.items?.length) return;
+  if (!cfg.subdomain || !cfg.apikey) return;
+  const recordId = c.daftraEstId || c.daftraInvId;
+  const type = c.daftraEstId ? 'estimates' : 'invoices';
+  if (!recordId) return;
+  loadingDaftraDetails.add(id);
+  try {
+    const res = await fetch(resolveDaftraProxyUrl(cfg.proxyUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subdomain: cfg.subdomain, apikey: cfg.apikey, endpoint: `${type}/${recordId}.json`, method: 'GET' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || data.message || 'تعذر جلب تفاصيل دفترة');
+    const record = data.Estimate || data.Invoice || data.data?.Estimate || data.data?.Invoice || data.data || data;
+    c.daftraDetails = daftraDetailsFrom(record, data);
+    if (c.daftraDetails.clientPhone && !c.phone) c.phone = c.daftraDetails.clientPhone;
+    if (record.client_state && !c.location) c.location = record.client_state;
+    saveClients();
+    if (apiOnline) {
+      apiRequest('/clients-cache', {
+        method: 'POST',
+        body: JSON.stringify({
+          clients,
+          syncedAt: new Date().toISOString(),
+          counts: { estimates: clients.filter(x => x.daftraEstId).length, invoices: clients.filter(x => x.daftraInvId).length }
+        })
+      }).catch(() => {});
+    }
+    if (document.getElementById('modal').style.display === 'flex') showModal(id);
+  } catch(e) {
+    showMsg('⚠️ تعذر جلب تفاصيل دفترة: ' + e.message);
+  } finally {
+    loadingDaftraDetails.delete(id);
+  }
 }
 
 function addClient() {
@@ -1269,8 +1348,8 @@ function renderDashboard() {
     if (dd) dd.textContent = dateLabel;
   });
 
-  const stale    = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && (daysOld(c.created)||0) > 3);
-  const newToday = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && c.created === today);
+  const stale    = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && (daysOld(followupDate(c))||0) > 3);
+  const newToday = clients.filter(c => !dismissed.has(c.id) && isActiveFollowupQuote(c) && followupDate(c) === today);
   const todayInst = clients.filter(c =>
     !dismissed.has(c.id) &&
     (c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب') &&
@@ -1337,7 +1416,7 @@ function renderDashboard() {
     ${secHdr('#E24B4A','🔴','عروض بدون متابعة — أكثر من 3 أيام', stale.length)}
     ${stale.length ? stale.map(c => card(
       '#E24B4A','#1f0e0e', c.name,
-      sub(c,false), 'منذ '+(daysOld(c.created)||0)+' يوم',
+      sub(c,false), 'منذ '+(daysOld(followupDate(c))||0)+' يوم',
       c.id,
       c.phone ? waBtn('واتساب',"waMsg('new','"+c.id+"')") : '',
       "contactClient('"+c.id+"')"
@@ -2002,6 +2081,46 @@ function advance(id) {
   closeModal(); render();
 }
 
+function renderDaftraDetails(c) {
+  if (!c.daftraDetails) {
+    return '<div class="text-secondary" style="font-size:12px;margin:10px 0">جاري محاولة جلب تفاصيل دفترة...</div>';
+  }
+  const d = c.daftraDetails;
+  const items = Array.isArray(d.items) ? d.items : [];
+  return `
+    <div style="border-top:0.5px solid #d8e0e7;margin-top:12px;padding-top:12px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">تفاصيل دفترة</div>
+      <div style="display:grid;gap:6px;margin-bottom:10px">
+        ${d.status ? `<div class="row"><span class="text-secondary">حالة دفترة</span><span>${htmlEscape(d.status)}</span></div>` : ''}
+        ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل</span><span>${htmlEscape(c.updatedAt)}</span></div>` : ''}
+        ${d.notes ? `<div class="row"><span class="text-secondary">ملاحظات</span><span>${htmlEscape(d.notes)}</span></div>` : ''}
+        ${d.terms ? `<div class="row"><span class="text-secondary">الشروط</span><span>${htmlEscape(d.terms)}</span></div>` : ''}
+      </div>
+      ${items.length ? `<div style="overflow:auto;border:0.5px solid #d8e0e7;border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px">
+          <thead>
+            <tr style="background:#f3f6f8;color:#667085">
+              <th style="text-align:right;padding:8px">البند</th>
+              <th style="text-align:right;padding:8px">الوصف</th>
+              <th style="text-align:center;padding:8px">الكمية</th>
+              <th style="text-align:left;padding:8px">السعر</th>
+              <th style="text-align:left;padding:8px">الإجمالي</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(item => `<tr style="border-top:0.5px solid #e6ebef">
+              <td style="padding:8px;font-weight:600">${htmlEscape(item.name)}</td>
+              <td style="padding:8px;color:#667085">${htmlEscape(item.description || '—')}</td>
+              <td style="padding:8px;text-align:center">${htmlEscape(item.quantity || '—')}</td>
+              <td style="padding:8px;text-align:left">${htmlEscape(item.unitPrice || '—')}</td>
+              <td style="padding:8px;text-align:left;font-weight:700">${htmlEscape(item.total || '—')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div class="text-secondary" style="font-size:12px">${loadingDaftraDetails.has(c.id) ? 'جاري جلب بنود العرض من دفترة...' : 'لم ترجع دفترة بنود العرض لهذا السجل، وقد تكون تفاصيل البنود في مسار مختلف داخل دفترة.'}</div>`}
+    </div>`;
+}
+
 function showModal(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
@@ -2028,9 +2147,11 @@ function showModal(id) {
       </div>
     </div>
     ${[['الجوال',c.phone],['المنتجات',c.products],['الموقع',c.location],['المسؤول',c.assignedTo],['تاريخ التركيب',c.installDate||'لم يحدد'],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
+    ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل في دفترة</span><span>${c.updatedAt}</span></div>` : ''}
     <div style="background:#13161f;border-radius:8px;padding:10px 12px;margin:12px 0">
       ${[['الإجمالي',c.offerPrice.toLocaleString()+' ر.س'],['دفعة أولى',c.deposit.toLocaleString()+' ر.س'],['دفعة ثانية',c.remaining.toLocaleString()+' ر.س']].map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:3px 0"><span class="text-secondary">${k}</span><span class="text-success" style="font-weight:500">${v}</span></div>`).join('')}
     </div>
+    ${c.source === 'daftra' ? renderDaftraDetails(c) : ''}
     <div class="flex gap-8" style="flex-wrap:wrap">
       ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
       ${!taxInvoice && c.stage !== 'استغنى' ? `<button class="btn-secondary" style="flex:1;color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>` : ''}
@@ -2040,6 +2161,7 @@ function showModal(id) {
       <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>
     </div>`;
   document.getElementById('modal').style.display = 'flex';
+  if (c.source === 'daftra' && !c.daftraDetails?.items?.length) loadDaftraRecordDetails(c.id);
 }
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
@@ -2053,17 +2175,19 @@ function renderClientOverview() {
 
   const pending = clients
     .filter(isActiveFollowupQuote)
-    .sort((a, b) => new Date(a.created || '2100-01-01') - new Date(b.created || '2100-01-01'));
+    .sort((a, b) => new Date(followupDate(b) || '1900-01-01') - new Date(followupDate(a) || '1900-01-01'));
 
   pendingCount.textContent = pending.length;
   pendingEl.innerHTML = pending.length ? pending.map(c => {
-    const old = daysOld(c.created);
-    const followText = old === null ? 'يحتاج متابعة' : old <= 0 ? 'وصل اليوم' : 'منذ ' + old + ' يوم';
+    const activity = followupDate(c);
+    const old = daysOld(activity);
+    const wasUpdated = c.updatedAt && c.updatedAt !== c.created;
+    const followText = old === null ? 'يحتاج متابعة' : old <= 0 ? (wasUpdated ? 'تعديل اليوم' : 'وصل اليوم') : (wasUpdated ? 'تعديل منذ ' + old + ' يوم' : 'منذ ' + old + ' يوم');
     return `<div class="card followup-card" style="margin-bottom:8px">
       <div class="flex-between mb-8" style="gap:10px">
         <div>
           <div style="font-size:14px;font-weight:700">${c.name || 'عميل'}</div>
-          <div class="text-secondary" style="font-size:11px;margin-top:3px">${c.daftraNo ? 'عرض #' + c.daftraNo + ' — ' : ''}${c.created || 'بدون تاريخ'}</div>
+          <div class="text-secondary" style="font-size:11px;margin-top:3px">${c.daftraNo ? 'عرض #' + c.daftraNo + ' — ' : ''}تاريخ العرض: ${c.created || 'بدون تاريخ'}${wasUpdated ? ' — آخر تعديل: ' + c.updatedAt : ''}</div>
         </div>
         <span class="badge" style="background:#E24B4A;color:#fff">${followText}</span>
       </div>
@@ -2107,7 +2231,7 @@ function renderClientOverview() {
           return `<div class="list-row">
             <div>
               <div style="font-weight:700">${c.name || 'عميل'}</div>
-              <div class="text-secondary" style="margin-top:3px">تاريخ العرض: ${c.created}${c.daftraNo ? ' — #' + c.daftraNo : ''}</div>
+              <div class="text-secondary" style="margin-top:3px">تاريخ العرض: ${c.created}${c.daftraNo ? ' — #' + c.daftraNo : ''}${c.updatedAt && c.updatedAt !== c.created ? ' — آخر تعديل: ' + c.updatedAt : ''}</div>
               <div class="text-secondary" style="margin-top:3px">${c.products || '—'} — ${c.location || 'بدون موقع'}</div>
               ${c.installDate ? `<div class="text-secondary" style="margin-top:3px">موعد التركيب: ${c.installDate}</div>` : ''}
             </div>

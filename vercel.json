@@ -8,6 +8,9 @@
     { "src": "api/daftra.js", "use": "@vercel/node" },
     { "src": "api/app.js", "use": "@vercel/node" }
   ],
+  "crons": [
+    { "path": "/api/app/sync-daftra-cache", "schedule": "*/10 * * * *" }
+  ],
   "routes": [
     { "src": "/api/daftra", "dest": "/api/daftra.js" },
     { "src": "/api/app/(.*)", "dest": "/api/app.js?path=/$1" },

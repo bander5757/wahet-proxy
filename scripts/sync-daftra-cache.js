@@ -20,6 +20,50 @@ function moneyNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function dateOnly(value) {
+  return value ? String(value).slice(0, 10) : "";
+}
+
+function firstDate(...values) {
+  return values.map(dateOnly).find(Boolean) || "";
+}
+
+function daftraItemsFrom(record, wrapper) {
+  const candidates = [
+    wrapper?.EstimateItem,
+    wrapper?.EstimateItems,
+    wrapper?.InvoiceItem,
+    wrapper?.InvoiceItems,
+    record?.EstimateItem,
+    record?.EstimateItems,
+    record?.InvoiceItem,
+    record?.InvoiceItems,
+    record?.items,
+    record?.line_items,
+    record?.details,
+  ];
+  const items = candidates.find(Array.isArray) || [];
+  return items.map((item) => item.EstimateItem || item.InvoiceItem || item).map((item) => ({
+    name: item.item || item.name || item.product_name || item.description || item.item_name || "بند",
+    description: item.description || item.details || "",
+    quantity: item.quantity || item.qty || "",
+    unitPrice: item.unit_price || item.price || item.unitPrice || "",
+    tax: item.tax1 || item.tax || item.tax_value || "",
+    total: item.total || item.subtotal || item.line_total || "",
+  }));
+}
+
+function daftraDetailsFrom(record, wrapper) {
+  return {
+    status: record.status || record.state || "",
+    clientName: record.client_business_name || record.client_first_name || record.client_name || "",
+    clientPhone: record.client_phone || "",
+    notes: record.notes || record.note || record.description || "",
+    terms: record.terms || record.terms_conditions || "",
+    items: daftraItemsFrom(record, wrapper),
+  };
+}
+
 async function main() {
   const databaseUrl = readLocalDatabaseUrl();
   if (!databaseUrl) throw new Error("DATABASE_URL is missing");
@@ -90,6 +134,8 @@ async function main() {
     const merged = [];
     for (const item of estimates) {
       const est = item.Estimate || item;
+      const created = firstDate(est.date, est.created_at, est.created);
+      const updatedAt = firstDate(est.updated_at, est.modified, est.modified_at, est.last_modified, est.last_update, est.date);
       const hasInvoice = invoices.some((row) => {
         const inv = row.Invoice || row;
         return String(inv.estimate_id || inv.estimateId || "") === String(est.id);
@@ -114,9 +160,12 @@ async function main() {
         installDate: "",
         notes: "",
         assignedTo: "—",
-        created: String(est.date || "").slice(0, 10),
+        created,
+        updatedAt,
+        followupDate: updatedAt || created,
         source: "daftra",
         daftraNo: est.no,
+        daftraDetails: daftraDetailsFrom(est, item),
       };
       Object.assign(card, states[card.id] || {});
       if (card.quoteConfirmed && card.stage === "عرض_سعر") card.stage = "موافق";
@@ -126,6 +175,8 @@ async function main() {
     for (const item of invoices) {
       const inv = item.Invoice || item;
       const relatedEstimateId = inv.estimate_id || inv.estimateId || inv.Estimate?.id || "";
+      const created = firstDate(inv.date, inv.created_at, inv.created);
+      const updatedAt = firstDate(inv.updated_at, inv.modified, inv.modified_at, inv.last_modified, inv.last_update, inv.date);
       const existing = merged.find(
         (card) =>
           (relatedEstimateId && String(card.daftraEstId || "") === String(relatedEstimateId)) ||
@@ -150,9 +201,12 @@ async function main() {
         installDate: existing?.installDate || "",
         notes: existing?.notes || "",
         assignedTo: existing?.assignedTo || "—",
-        created: String(inv.date || "").slice(0, 10),
+        created,
+        updatedAt,
+        followupDate: updatedAt || created,
         source: "daftra",
         daftraNo: inv.no,
+        daftraDetails: daftraDetailsFrom(inv, item),
       };
       Object.assign(card, states[card.id] || {});
       card.quoteConfirmed = true;
