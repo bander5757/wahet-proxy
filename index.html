@@ -345,6 +345,35 @@
       <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
     </div>
     <div id="finance-summary" class="grid-4"></div>
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">المحاسب الذكي</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">مطابقة كشف البنك، ضريبة الربع، وتقرير أسبوعي جاهز للمراجعة</div>
+        </div>
+        <button class="btn-primary" onclick="runSmartAccounting()">تحليل الآن</button>
+      </div>
+      <div class="grid-2">
+        <div>
+          <div class="label">رفع كشف البنك CSV</div>
+          <input id="bank-file" type="file" accept=".csv,.txt" onchange="loadBankFile(event)">
+        </div>
+        <div>
+          <div class="label">الشهر</div>
+          <input id="bank-month" type="month">
+        </div>
+        <div style="grid-column:1/-1">
+          <div class="label">أو الصق كشف البنك هنا</div>
+          <textarea id="bank-text" rows="5" placeholder="التاريخ, البيان, مدين, دائن&#10;2026-06-01, تحويل عميل, , 1150"></textarea>
+        </div>
+      </div>
+      <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
+        <button class="btn-secondary" onclick="runSmartAccounting()">مطابقة وحساب</button>
+        <button class="btn-secondary" onclick="copyAccountingReport()">نسخ التقرير</button>
+        <button class="btn-secondary" onclick="clearBankStatement()">مسح كشف البنك</button>
+      </div>
+      <div id="smart-accounting-view" class="mt-8"></div>
+    </div>
     <div id="finance-list" class="mt-8"></div>
   </div>
 </div>
@@ -570,6 +599,9 @@ const dismissed  = new Set();
 let activeTab = 'home';
 let financeEntries = [];
 try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
+let bankStatementRows = [];
+try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
+let lastAccountingReport = '';
 let staffDocs = [];
 try { staffDocs = JSON.parse(localStorage.getItem('wk_staff_docs') || '[]'); } catch(e) { staffDocs = []; }
 let vehicles = [];
@@ -613,6 +645,12 @@ const FOLLOWUP_START_DATE = '2026-06-01';
 const dateOnly = value => value ? String(value).slice(0, 10) : '';
 const firstDate = (...values) => values.map(dateOnly).find(Boolean) || '';
 const followupDate = c => c.followupDate || c.updatedAt || c.created || '';
+const localDateString = date => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 const htmlEscape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[ch]));
 const daftraItemsFrom = (record, wrapper) => {
   const candidates = [
@@ -680,6 +718,9 @@ const saveClients = () => {
 };
 const saveFinance = () => {
   try { localStorage.setItem('wk_finance_entries', JSON.stringify(financeEntries)); } catch(e) {}
+};
+const saveBankStatement = () => {
+  try { localStorage.setItem('wk_bank_statement_rows', JSON.stringify(bankStatementRows)); } catch(e) {}
 };
 const saveStaffDocs = () => {
   try { localStorage.setItem('wk_staff_docs', JSON.stringify(staffDocs)); } catch(e) {}
@@ -1852,6 +1893,219 @@ function financeStatusColor(status) {
   return status === 'approved' ? '#5DCAA5' : status === 'rejected' ? '#E24B4A' : '#FAC775';
 }
 
+function parseCsvLine(line) {
+  const cells = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"' && line[i + 1] === '"') {
+      current += '"';
+      i++;
+    } else if (ch === '"') {
+      quoted = !quoted;
+    } else if ((ch === ',' || ch === ';' || ch === '\t') && !quoted) {
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function parseMoneyValue(value) {
+  const text = String(value || '').replace(/[^\d.,\-]/g, '').replace(/,/g, '');
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseBankStatement(text) {
+  const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const rows = [];
+  const first = parseCsvLine(lines[0]).map(x => x.toLowerCase());
+  const hasHeader = first.some(x => /date|تاريخ|بيان|description|مدين|دائن|debit|credit|amount|مبلغ/.test(x));
+  const header = hasHeader ? first : [];
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  dataLines.forEach((line, idx) => {
+    const cells = parseCsvLine(line);
+    const get = names => {
+      for (const name of names) {
+        const i = header.findIndex(h => h.includes(name));
+        if (i >= 0) return cells[i] || '';
+      }
+      return '';
+    };
+    const date = dateOnly(get(['date','تاريخ']) || cells[0]);
+    const description = get(['description','بيان','وصف','details']) || cells[1] || '';
+    const debitRaw = get(['debit','مدين','سحب']) || cells[2] || '';
+    const creditRaw = get(['credit','دائن','إيداع']) || cells[3] || '';
+    const amountRaw = get(['amount','مبلغ']) || cells[2] || '';
+    const debit = parseMoneyValue(debitRaw);
+    const credit = parseMoneyValue(creditRaw);
+    let amount = credit - debit;
+    if (!credit && !debit) amount = parseMoneyValue(amountRaw);
+    if (!date && !description && !amount) return;
+    rows.push({
+      id: 'bank_' + Date.now() + '_' + idx,
+      date,
+      description,
+      debit: debit || (amount < 0 ? Math.abs(amount) : 0),
+      credit: credit || (amount > 0 ? amount : 0),
+      amount,
+    });
+  });
+  return rows;
+}
+
+function loadBankFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById('bank-text').value = String(reader.result || '');
+    runSmartAccounting();
+  };
+  reader.readAsText(file);
+}
+
+function clearBankStatement() {
+  bankStatementRows = [];
+  saveBankStatement();
+  const text = document.getElementById('bank-text');
+  const file = document.getElementById('bank-file');
+  if (text) text.value = '';
+  if (file) file.value = '';
+  renderSmartAccounting();
+}
+
+function quarterRange(date = new Date()) {
+  const y = date.getFullYear();
+  const q = Math.floor(date.getMonth() / 3);
+  const start = new Date(y, q * 3, 1);
+  const end = new Date(y, q * 3 + 3, 0);
+  return {
+    label: 'Q' + (q + 1) + ' ' + y,
+    start: localDateString(start),
+    end: localDateString(end),
+  };
+}
+
+function inDateRange(date, start, end) {
+  const d = dateOnly(date);
+  return d && d >= start && d <= end;
+}
+
+function findBankMatches(row) {
+  const amount = Math.abs(row.amount);
+  const sameDirection = financeEntries.filter(e => {
+    if ((e.status || 'draft') === 'rejected') return false;
+    const isOut = ['مصروف','عهدة','سلفة','تحويل'].includes(e.type);
+    const isIn = ['إيراد'].includes(e.type);
+    if (row.amount < 0 && !isOut) return false;
+    if (row.amount > 0 && !isIn) return false;
+    return Math.abs((Number(e.amount) || 0) - amount) <= 1;
+  });
+  return sameDirection.slice(0, 3);
+}
+
+function buildAccountingAnalysis() {
+  const qr = quarterRange();
+  const approved = approvedFinanceEntries();
+  const quarterInvoices = clients.filter(c => isTaxInvoice(c) && inDateRange(c.created, qr.start, qr.end));
+  const quarterConfirmedUnbilled = clients.filter(c => isConfirmedSale(c) && !isTaxInvoice(c) && inDateRange(c.created, qr.start, qr.end));
+  const quarterExpenses = approved.filter(e => ['مصروف','عهدة'].includes(e.type) && inDateRange(e.created, qr.start, qr.end));
+  const weekly = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
+  const outputVat = quarterInvoices.reduce((sum, c) => sum + ((Number(c.offerPrice) || 0) * 15 / 115), 0);
+  const inputVatEstimate = quarterExpenses.reduce((sum, e) => sum + ((Number(e.amount) || 0) * 15 / 115), 0);
+  const bankMatches = bankStatementRows.map(row => ({ row, matches: findBankMatches(row) }));
+  const unmatchedBank = bankMatches.filter(x => !x.matches.length);
+  const matchedBank = bankMatches.filter(x => x.matches.length);
+  const risks = [];
+  if (quarterConfirmedUnbilled.length) risks.push(quarterConfirmedUnbilled.length + ' عروض مؤكدة غير مفوترة ضريبياً، لا تدخلها في الإقرار قبل المراجعة');
+  if (draftFinanceEntries().length) risks.push(draftFinanceEntries().length + ' حركات مالية بانتظار الاعتماد');
+  if (unmatchedBank.length) risks.push(unmatchedBank.length + ' حركة بنكية غير مطابقة في الكشف');
+  if (!bankStatementRows.length) risks.push('لم يتم إدخال كشف بنك للمطابقة');
+  return {
+    qr,
+    quarterInvoices,
+    quarterConfirmedUnbilled,
+    quarterExpenses,
+    weekly,
+    outputVat,
+    inputVatEstimate,
+    netVat: outputVat - inputVatEstimate,
+    bankMatches,
+    matchedBank,
+    unmatchedBank,
+    risks,
+  };
+}
+
+function runSmartAccounting() {
+  const text = document.getElementById('bank-text')?.value || '';
+  if (text.trim()) {
+    bankStatementRows = parseBankStatement(text);
+    saveBankStatement();
+  }
+  renderSmartAccounting();
+  showMsg('✅ تم تحليل المحاسب الذكي');
+}
+
+function renderSmartAccounting() {
+  const el = document.getElementById('smart-accounting-view');
+  if (!el) return;
+  const month = document.getElementById('bank-month');
+  if (month && !month.value) month.value = new Date().toISOString().slice(0, 7);
+  const a = buildAccountingAnalysis();
+  lastAccountingReport = [
+    'تقرير المحاسب الذكي - واحة الخيمة',
+    'الفترة الضريبية: ' + a.qr.label + ' (' + a.qr.start + ' إلى ' + a.qr.end + ')',
+    'الفواتير الضريبية: ' + a.quarterInvoices.length + ' | ضريبة مبيعات تقديرية: ' + money(a.outputVat),
+    'مصروفات قابلة للمراجعة: ' + a.quarterExpenses.length + ' | ضريبة مشتريات تقديرية: ' + money(a.inputVatEstimate),
+    'صافي ضريبة تقديري: ' + money(a.netVat),
+    'مصروفات آخر 7 أيام: ' + money(a.weekly.out) + ' | إيرادات آخر 7 أيام: ' + money(a.weekly.income),
+    'مطابقة البنك: ' + a.matchedBank.length + ' مطابق / ' + a.unmatchedBank.length + ' غير مطابق',
+    'تنبيهات: ' + (a.risks.join('، ') || 'لا توجد تنبيهات كبيرة'),
+  ].join('\n');
+  el.innerHTML = `
+    <div class="grid-4">
+      <div class="stat-card"><div class="label">ضريبة مبيعات تقديرية</div><div style="font-size:18px;color:#5DCAA5;font-weight:700">${money(a.outputVat)}</div></div>
+      <div class="stat-card"><div class="label">ضريبة مشتريات تقديرية</div><div style="font-size:18px;color:#85B7EB;font-weight:700">${money(a.inputVatEstimate)}</div></div>
+      <div class="stat-card"><div class="label">صافي ضريبة الربع</div><div style="font-size:18px;color:${a.netVat >= 0 ? '#FAC775' : '#5DCAA5'};font-weight:700">${money(a.netVat)}</div></div>
+      <div class="stat-card"><div class="label">مطابقة البنك</div><div style="font-size:18px;color:#FAC775;font-weight:700">${a.matchedBank.length}/${bankStatementRows.length}</div></div>
+    </div>
+    <div class="grid-2 mt-8">
+      <div class="stat-card">
+        <div class="label">تنبيهات المحاسب الذكي</div>
+        ${a.risks.length ? a.risks.map(r => `<div class="list-row" style="padding:7px 0"><div style="font-size:12px">${r}</div>${statusPill('مراجعة', '#FAC775')}</div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد تنبيهات كبيرة</div>'}
+      </div>
+      <div class="stat-card">
+        <div class="label">تقرير مختصر</div>
+        <pre style="white-space:pre-wrap;margin:0;font-family:inherit;font-size:12px;line-height:1.7;color:inherit">${htmlEscape(lastAccountingReport)}</pre>
+      </div>
+    </div>
+    <div class="section" style="margin-top:10px">
+      <div class="flex-between mb-12"><div style="font-size:14px;font-weight:700">حركات البنك غير المطابقة</div><span class="badge" style="background:#1a3a5c;color:#85B7EB">${a.unmatchedBank.length}</span></div>
+      ${a.unmatchedBank.slice(0, 10).map(x => `<div class="list-row">
+        <div><div style="font-weight:600">${x.row.date || 'بدون تاريخ'} — ${money(Math.abs(x.row.amount))}</div><div class="text-secondary" style="margin-top:3px">${htmlEscape(x.row.description || 'بدون بيان')}</div></div>
+        ${statusPill(x.row.amount >= 0 ? 'إيداع' : 'سحب', x.row.amount >= 0 ? '#5DCAA5' : '#E24B4A')}
+      </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد حركات غير مطابقة أو لم يتم إدخال كشف بنك</div>'}
+    </div>`;
+}
+
+async function copyAccountingReport() {
+  if (!lastAccountingReport) renderSmartAccounting();
+  try {
+    await navigator.clipboard.writeText(lastAccountingReport);
+    showMsg('✅ تم نسخ تقرير المحاسب الذكي');
+  } catch(e) {
+    alert(lastAccountingReport || 'لا يوجد تقرير بعد');
+  }
+}
+
 function renderExecutive() {
   const el = document.getElementById('executive-dashboard');
   if (!el) return;
@@ -1936,6 +2190,7 @@ function renderFinance() {
         ${can('approveFinance') && e.status !== 'rejected' ? `<button class="btn-secondary" onclick="setFinanceStatus('${e.id}', 'rejected')">رفض</button>` : ''}
       </div>
     </div>`).join('') : '<div class="text-secondary" style="font-size:12px;padding:8px 0">لا توجد حركات مالية بعد</div>'}`;
+  renderSmartAccounting();
   const reports = document.getElementById('reports-view');
   if (reports) reports.innerHTML = `
     <div class="grid-2">
