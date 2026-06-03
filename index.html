@@ -655,6 +655,60 @@ const localDateString = date => {
   return `${y}-${m}-${d}`;
 };
 const htmlEscape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[ch]));
+const stripHtml = value => String(value || '')
+  .replace(/<br\s*\/?>/gi, '\n')
+  .replace(/<\/p>/gi, '\n')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ')
+  .replace(/&amp;/g, '&')
+  .replace(/\s+/g, ' ')
+  .trim();
+const normalizePhone = value => {
+  const text = String(value || '');
+  const match = text.match(/(?:\+?966|00966|0)?5\d{8}/);
+  if (!match) return '';
+  let phone = match[0].replace(/\D/g, '');
+  if (phone.startsWith('00966')) phone = phone.slice(2);
+  if (phone.startsWith('966')) return phone;
+  if (phone.startsWith('05')) return '966' + phone.slice(1);
+  if (phone.startsWith('5')) return '966' + phone;
+  return phone;
+};
+const firstText = (...values) => values.map(v => String(v || '').trim()).find(Boolean) || '';
+const extractLabeledValue = (text, labels) => {
+  for (const label of labels) {
+    const re = new RegExp(label + '\\s*[:：\\-]?\\s*([^\\n،؛|]+)', 'i');
+    const match = String(text || '').match(re);
+    if (match?.[1]) return match[1].trim().replace(/[.،؛]+$/, '');
+  }
+  return '';
+};
+const extractDateFromText = (text, labels) => {
+  const source = String(text || '');
+  for (const label of labels) {
+    const re = new RegExp(label + '[^\\d]{0,20}(\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}[-/]\\d{4})', 'i');
+    const match = source.match(re);
+    if (!match) continue;
+    const raw = match[1].replace(/\//g, '-');
+    const parts = raw.split('-').map(Number);
+    if (parts[0] > 1900) return `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+    return `${parts[2]}-${String(parts[1]).padStart(2, '0')}-${String(parts[0]).padStart(2, '0')}`;
+  }
+  return '';
+};
+const inferQuoteFields = (record, wrapper) => {
+  const rawNotes = firstText(record.html_notes, record.notes, record.note, record.description, wrapper?.html_notes, wrapper?.notes);
+  const notesText = stripHtml(rawNotes);
+  const address = firstText(record.client_state, record.client_city, record.client_address1, record.client_address2);
+  return {
+    phone: normalizePhone(firstText(record.client_phone, record.client_mobile, record.client_tel, record.phone, record.mobile, notesText)),
+    location: firstText(address, extractLabeledValue(notesText, ['الموقع', 'موقع التركيب', 'مكان التركيب', 'العنوان', 'المدينة'])),
+    duration: extractLabeledValue(notesText, ['المدة', 'مدة الايجار', 'مدة الإيجار', 'مدة التأجير']),
+    installDate: extractDateFromText(notesText, ['تاريخ التركيب', 'موعد التركيب', 'التركيب', 'بداية التركيب', 'بداية الإيجار']),
+    endDate: extractDateFromText(notesText, ['نهاية التركيب', 'تاريخ الفك', 'نهاية الإيجار', 'نهاية الايجار', 'تاريخ الانتهاء']),
+    notesText
+  };
+};
 const daftraItemsFrom = (record, wrapper) => {
   const candidates = [
     wrapper?.EstimateItem, wrapper?.EstimateItems, wrapper?.InvoiceItem, wrapper?.InvoiceItems,
@@ -671,14 +725,35 @@ const daftraItemsFrom = (record, wrapper) => {
     total: item.total || item.subtotal || item.line_total || ''
   }));
 };
-const daftraDetailsFrom = (record, wrapper) => ({
-  status: record.status || record.state || '',
-  clientName: record.client_business_name || record.client_first_name || record.client_name || '',
-  clientPhone: record.client_phone || '',
-  notes: record.notes || record.note || record.description || '',
-  terms: record.terms || record.terms_conditions || '',
-  items: daftraItemsFrom(record, wrapper)
-});
+const daftraDetailsFrom = (record, wrapper) => {
+  const inferred = inferQuoteFields(record || {}, wrapper || {});
+  return {
+    status: record.status || record.state || '',
+    clientName: record.client_business_name || record.client_first_name || record.client_name || '',
+    clientPhone: inferred.phone,
+    notes: firstText(record.notes, record.note, record.description, stripHtml(record.html_notes)),
+    terms: record.terms || record.terms_conditions || '',
+    inferred,
+    items: daftraItemsFrom(record, wrapper)
+  };
+};
+const applyInferredQuoteFields = c => {
+  if (c.daftraDetails && !c.daftraDetails.inferred) {
+    c.daftraDetails.inferred = inferQuoteFields({
+      client_phone: c.daftraDetails.clientPhone || c.phone || '',
+      client_state: c.location || '',
+      notes: c.daftraDetails.notes || '',
+      terms: c.daftraDetails.terms || ''
+    }, {});
+  }
+  const inferred = c.daftraDetails?.inferred || {};
+  if (!c.phone && inferred.phone) c.phone = inferred.phone;
+  if (!c.location && inferred.location) c.location = inferred.location;
+  if (!c.installDate && inferred.installDate) c.installDate = inferred.installDate;
+  if (!c.rentalDuration && inferred.duration) c.rentalDuration = inferred.duration;
+  if (!c.installEndDate && inferred.endDate) c.installEndDate = inferred.endDate;
+  return c;
+};
 const monthKey = d => d ? d.slice(0, 7) : '';
 const monthLabel = key => {
   if (!key) return 'بدون شهر';
@@ -796,7 +871,7 @@ async function loadAppData() {
       try { localStorage.setItem('wk_client_state', JSON.stringify(clientState)); } catch(e) {}
     }
     if (Array.isArray(data.clients)) {
-      clients = data.clients.map(c => applyClientState(c));
+      clients = data.clients.map(c => applyClientState(applyInferredQuoteFields(c)));
       saveClients();
       if (data.daftraSync?.syncedAt) {
         const lastSync = document.getElementById('last-sync');
@@ -1199,6 +1274,7 @@ async function syncDaftra() {
         source: 'daftra', daftraNo: est.no,
         daftraDetails: daftraDetailsFrom(est, e)
         };
+        applyInferredQuoteFields(card);
         applyClientState(card);
         if (card.quoteConfirmed && card.stage === 'عرض_سعر') card.stage = 'موافق';
         merged.push(card);
@@ -1232,6 +1308,7 @@ async function syncDaftra() {
         source: 'daftra', daftraNo: i.no,
         daftraDetails: daftraDetailsFrom(i, inv)
       };
+      applyInferredQuoteFields(card);
       applyClientState(card);
       card.quoteConfirmed = true;
       card.taxInvoiceIssued = true;
@@ -1288,8 +1365,7 @@ async function loadDaftraRecordDetails(id) {
     if (!res.ok || data.error) throw new Error(data.error || data.message || 'تعذر جلب تفاصيل دفترة');
     const record = data.Estimate || data.Invoice || data.data?.Estimate || data.data?.Invoice || data.data || data;
     c.daftraDetails = daftraDetailsFrom(record, data);
-    if (c.daftraDetails.clientPhone && !c.phone) c.phone = c.daftraDetails.clientPhone;
-    if (record.client_state && !c.location) c.location = record.client_state;
+    applyInferredQuoteFields(c);
     saveClients();
     if (apiOnline) {
       apiRequest('/clients-cache', {
@@ -2433,6 +2509,11 @@ function renderDaftraDetails(c) {
       <div style="display:grid;gap:6px;margin-bottom:10px">
         ${d.status ? `<div class="row"><span class="text-secondary">حالة دفترة</span><span>${htmlEscape(d.status)}</span></div>` : ''}
         ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل</span><span>${htmlEscape(c.updatedAt)}</span></div>` : ''}
+        ${d.inferred?.phone ? `<div class="row"><span class="text-secondary">جوال مستخرج</span><span dir="ltr">${htmlEscape(d.inferred.phone)}</span></div>` : ''}
+        ${d.inferred?.location ? `<div class="row"><span class="text-secondary">موقع مستخرج</span><span>${htmlEscape(d.inferred.location)}</span></div>` : ''}
+        ${d.inferred?.duration ? `<div class="row"><span class="text-secondary">مدة مستخرجة</span><span>${htmlEscape(d.inferred.duration)}</span></div>` : ''}
+        ${d.inferred?.installDate ? `<div class="row"><span class="text-secondary">تاريخ تركيب مستخرج</span><span>${htmlEscape(d.inferred.installDate)}</span></div>` : ''}
+        ${d.inferred?.endDate ? `<div class="row"><span class="text-secondary">نهاية مستخرجة</span><span>${htmlEscape(d.inferred.endDate)}</span></div>` : ''}
         ${d.notes ? `<div class="row"><span class="text-secondary">ملاحظات</span><span>${htmlEscape(d.notes)}</span></div>` : ''}
         ${d.terms ? `<div class="row"><span class="text-secondary">الشروط</span><span>${htmlEscape(d.terms)}</span></div>` : ''}
       </div>
@@ -2486,7 +2567,7 @@ function showModal(id) {
         <div style="font-size:13px;color:${taxInvoice?'#5DCAA5':'#9a9898'};font-weight:600">${taxInvoice?'صادرة':'غير محسوبة ضريبياً'}</div>
       </div>
     </div>
-    ${[['الجوال',c.phone],['المنتجات',c.products],['الموقع',c.location],['المسؤول',c.assignedTo],['تاريخ التركيب',c.installDate||'لم يحدد'],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
+    ${[['الجوال',c.phone ? `<span dir="ltr">${c.phone}</span>` : 'غير موجود في دفترة'],['المنتجات',c.products],['الموقع',c.location],['مدة الإيجار',c.rentalDuration],['تاريخ التركيب',c.installDate||'لم يحدد'],['نهاية التركيب/الفك',c.installEndDate],['المسؤول',c.assignedTo],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
     ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل في دفترة</span><span>${c.updatedAt}</span></div>` : ''}
     <div style="background:#13161f;border-radius:8px;padding:10px 12px;margin:12px 0">
       ${[['الإجمالي',c.offerPrice.toLocaleString()+' ر.س'],['دفعة أولى',c.deposit.toLocaleString()+' ر.س'],['دفعة ثانية',c.remaining.toLocaleString()+' ر.س']].map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:3px 0"><span class="text-secondary">${k}</span><span class="text-success" style="font-weight:500">${v}</span></div>`).join('')}
