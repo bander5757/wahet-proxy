@@ -187,7 +187,7 @@
   </div>
   <div class="flex gap-6 header-actions">
     <button class="btn-secondary mobile-menu-btn" onclick="toggleSideMenu()">☰</button>
-    <button class="btn-secondary" data-mobile-hide="true" onclick="showDailyPanel()">📋 متابعة</button>
+    <button class="btn-secondary" data-mobile-hide="true" onclick="showDailyPanel()">📋 اليوم</button>
     <button class="btn-secondary" onclick="openLogin()">👤 دخول</button>
     <button class="btn-secondary" id="theme-btn" onclick="toggleTheme()">☀️ عادي</button>
     <button class="btn-secondary" data-mobile-hide="true" style="position:relative" onclick="toggleNotif()">
@@ -200,7 +200,6 @@
 
 <div class="tabs desktop-nav" id="tabs">
   <button class="tab-btn active" onclick="setTab('home')">الرئيسية</button>
-  <button class="tab-btn" onclick="setTab('daily')">المتابعة</button>
   <button class="tab-btn" onclick="setTab('clients')">العملاء</button>
   <button class="tab-btn" onclick="setTab('finance')">المحاسبة</button>
   <button class="tab-btn" onclick="setTab('ops')">التركيبات</button>
@@ -220,7 +219,6 @@
   </div>
   <div class="side-nav" id="side-nav">
     <button class="active" onclick="setTab('home')"><span>🏠</span><span>الرئيسية</span></button>
-    <button onclick="setTab('daily')"><span>📋</span><span>المتابعة</span></button>
     <button onclick="setTab('clients')"><span>👥</span><span>العملاء</span></button>
     <button onclick="setTab('finance')"><span>💰</span><span>المحاسبة</span></button>
     <button onclick="setTab('ops')"><span>🔧</span><span>التركيبات</span></button>
@@ -256,19 +254,6 @@
 
 <div id="tab-home" class="tab-page active">
   <div id="executive-dashboard"></div>
-</div>
-
-<div id="tab-daily" class="tab-page">
-  <div class="section">
-    <div class="flex-between mb-12">
-      <div>
-        <div style="font-size:15px;font-weight:600">المتابعة اليومية</div>
-        <div id="daily-tab-date" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
-      </div>
-      <button class="btn-secondary" onclick="renderDashboard()">تحديث</button>
-    </div>
-    <div id="daily-tab-content"></div>
-  </div>
 </div>
 
 <div id="tab-clients" class="tab-page">
@@ -555,7 +540,6 @@
 
 <div class="bottom-nav" id="bottom-nav">
   <button class="active" onclick="setTab('home')">الرئيسية</button>
-  <button onclick="setTab('daily')">المتابعة</button>
   <button onclick="setTab('clients')">العملاء</button>
   <button onclick="setTab('finance')">المحاسبة</button>
   <button onclick="setTab('ops')">التركيبات</button>
@@ -569,7 +553,7 @@
   <div style="background:#1a1d2b;border:0.5px solid #2e3244;border-radius:16px;width:600px;max-width:100%;direction:rtl;padding:1.5rem;margin:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div>
-        <div style="font-size:15px;font-weight:600">📋 لوحة المتابعة اليومية</div>
+        <div style="font-size:15px;font-weight:600">📋 لوحة اليوم</div>
         <div id="daily-date" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
       </div>
       <button onclick="document.getElementById('daily-panel').style.display='none'" style="background:transparent;border:0.5px solid #2e3244;color:#9a9898;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit">✕ إغلاق</button>
@@ -1471,11 +1455,11 @@ function reopenQuote(id) {
 }
 
 function renderDashboard() {
-  const targets = ['daily-content', 'daily-tab-content'].map(id => document.getElementById(id)).filter(Boolean);
+  const targets = ['daily-content'].map(id => document.getElementById(id)).filter(Boolean);
   if (!targets.length) return;
   const today = new Date().toISOString().slice(0, 10);
   const dateLabel = new Date().toLocaleDateString('ar-SA', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
-  ['daily-date', 'daily-tab-date'].forEach(id => {
+  ['daily-date'].forEach(id => {
     const dd = document.getElementById(id);
     if (dd) dd.textContent = dateLabel;
   });
@@ -1602,10 +1586,11 @@ function showDailyPanel() {
 }
 
 function setTab(tab) {
+  const page = document.getElementById('tab-' + tab);
+  if (!page) tab = 'home';
   activeTab = tab;
   document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
-  const page = document.getElementById('tab-' + tab);
-  if (page) page.classList.add('active');
+  document.getElementById('tab-' + tab)?.classList.add('active');
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   document.querySelectorAll('#side-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
