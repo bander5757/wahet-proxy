@@ -780,16 +780,7 @@ const TENDER_PLATFORMS = [
   { id: 'etimad', name: 'اعتماد', url: 'https://tenders.etimad.sa/Tender', site: 'tenders.etimad.sa', type: 'tender' },
   { id: 'tanafos', name: 'تنافس', url: 'https://tanafos.sa/', site: 'tanafos.sa' },
   { id: 'furas', name: 'فرص', url: 'https://furas.momah.gov.sa/ar', site: 'furas.momah.gov.sa' },
-  { id: 'gea', name: 'فرص الترفيه', url: 'https://gea.gov.sa/initiatives/furas-platform/', site: 'gea.gov.sa' },
-  { id: 'web', name: 'بحث الإنترنت', url: 'https://www.google.com/search?q=' + encodeURIComponent('خيام أوروبية مناقصة OR منافسة OR تأجير خيام'), site: '' }
-];
-const MARKET_SEARCHES = [
-  { type: 'lead', name: 'منظمو فعاليات', query: 'منظم فعاليات مهرجان خارجي السعودية خيام OR ضيافة' },
-  { type: 'lead', name: 'قصور واستراحات', query: 'قصر مناسبات استراحة فعاليات خارجية السعودية خيام' },
-  { type: 'event', name: 'مهرجانات موسمية', query: 'مهرجان شتوي فعالية خارجية السعودية موقع مؤقت' },
-  { type: 'event', name: 'معارض ومزادات', query: 'معرض خارجي مزاد فعالية السعودية تجهيز خيام' },
-  { type: 'site', name: 'مواقع وفرص تشغيل', query: 'فرصة موقع مؤقت فعالية ترفيهية خيام السعودية' },
-  { type: 'lead', name: 'منتجعات ومخيمات فاخرة', query: 'منتجع مخيم فاخر السعودية فعاليات خيام أوروبية' }
+  { id: 'gea', name: 'فرص الترفيه', url: 'https://gea.gov.sa/initiatives/furas-platform/', site: 'gea.gov.sa' }
 ];
 const TENDER_TYPE_LABELS = { tender: 'منافسة', lead: 'عميل محتمل', site: 'موقع/تشغيل', event: 'فعالية' };
 const TENDER_FOLLOW_LABELS = { new: 'جديدة', reviewing: 'قيد المراجعة', contacted: 'تم التواصل', proposal: 'تم تجهيز عرض', ignored: 'تم التجاهل', done: 'منتهية' };
@@ -1900,109 +1891,30 @@ function openTenderPlatform(platformId) {
   if (p) window.open(p.url, '_blank');
 }
 
-function openTenderSearch(platformId, keywordIndex) {
-  const p = TENDER_PLATFORMS.find(x => x.id === platformId);
-  const keyword = TENDER_KEYWORDS[keywordIndex];
-  if (!p || !keyword) return;
-  const query = p.site ? `${keyword} site:${p.site}` : `${keyword} مناقصة OR منافسة OR فرصة OR توريد OR تأجير`;
-  window.open('https://www.google.com/search?q=' + encodeURIComponent(query), '_blank');
-}
-
-function openAllTenderSearches(keywordIndex) {
-  TENDER_PLATFORMS.forEach(p => openTenderSearch(p.id, keywordIndex));
-}
-
-function buildSearchUrl(query) {
-  return 'https://www.google.com/search?q=' + encodeURIComponent(query);
-}
-
-function tenderRadarQueries() {
-  const primary = TENDER_KEYWORDS.slice(0, 10).flatMap(keyword => (
-    TENDER_PLATFORMS.slice(0, 4).map(platform => {
-      const query = platform.site
-        ? `${keyword} site:${platform.site}`
-        : `${keyword} مناقصة OR منافسة OR فرصة OR توريد OR تأجير`;
-      return {
-        title: `${platform.name} - ${keyword}`,
-        platform: platform.name,
-        type: platform.id === 'furas' ? 'site' : platform.id === 'gea' ? 'event' : 'tender',
-        keyword,
-        query,
-        url: buildSearchUrl(query),
-        action: platform.id === 'etimad' || platform.id === 'tanafos' ? 'مراجعة الرابط' : 'اتصال',
-        reason: `بحث يومي عن ${keyword} في ${platform.name}`
-      };
-    })
-  ));
-  const market = MARKET_SEARCHES.map(item => ({
-    title: `بحث تسويقي - ${item.name}`,
-    platform: 'بحث الإنترنت',
-    type: item.type,
-    keyword: item.name,
-    query: item.query,
-    url: buildSearchUrl(item.query),
-    action: item.type === 'lead' ? 'اتصال' : 'مراجعة الرابط',
-    reason: `بحث عن ${item.name} قد يحتاجون تأجير الخيام الأوروبية`
-  }));
-  return [...primary, ...market];
-}
-
-function runTenderRadar() {
-  const today = new Date().toISOString().slice(0, 10);
-  const queries = tenderRadarQueries();
+async function runTenderRadar() {
+  const radarBox = document.getElementById('tender-radar-results');
+  if (radarBox) radarBox.innerHTML = '<div class="section" style="margin-bottom:12px"><div class="text-secondary" style="font-size:12px">جاري جلب فرص اعتماد وحفظ النتائج...</div></div>';
   try {
-    localStorage.setItem('wk_tender_radar_date', today);
-    localStorage.setItem('wk_tender_radar_queries', JSON.stringify(queries));
-  } catch(e) {}
-  showMsg(`✅ تم تجهيز ${queries.length} مسار بحث لليوم`);
-  render();
-}
-
-function getTenderRadarQueries() {
-  try {
-    const raw = localStorage.getItem('wk_tender_radar_queries');
-    return raw ? JSON.parse(raw) : [];
-  } catch(e) {
-    return [];
-  }
-}
-
-function openRadarQuery(index) {
-  const item = getTenderRadarQueries()[index];
-  if (item?.url) window.open(item.url, '_blank');
-}
-
-async function saveRadarCandidate(index) {
-  const item = getTenderRadarQueries()[index];
-  if (!item) return;
-  const candidate = {
-    id: 'tender_' + Date.now(),
-    title: item.title,
-    entity: item.platform,
-    type: item.type,
-    due: '',
-    score: 'تحتاج مراجعة',
-    platform: item.platform,
-    keyword: item.keyword,
-    action: item.action,
-    followStatus: 'new',
-    url: item.url,
-    reason: item.reason,
-  };
-  if (apiOnline) {
-    try {
-      const res = await apiRequest('/tenders', { method: 'POST', body: JSON.stringify(candidate) });
-      tenders.unshift(res.data);
-    } catch(e) {
-      tenders.unshift(candidate);
-      showMsg('⚠️ تم حفظ الفرصة محلياً فقط');
+    const res = await apiRequest('/tenders/radar-scan', { method: 'POST', body: JSON.stringify({}) });
+    const saved = res.data?.saved || [];
+    const errors = res.data?.errors || [];
+    if (saved.length) {
+      const existing = new Map(tenders.map(t => [t.externalKey || t.id, t]));
+      saved.forEach(t => existing.set(t.externalKey || t.id, t));
+      tenders = Array.from(existing.values()).sort((a, b) => String(b.lastSeen || b.created || '').localeCompare(String(a.lastSeen || a.created || '')));
+      saveTenders();
     }
-  } else {
-    tenders.unshift(candidate);
+    try {
+      localStorage.setItem('wk_tender_radar_date', new Date().toISOString().slice(0, 10));
+      localStorage.setItem('wk_tender_radar_last_count', String(saved.length));
+      localStorage.setItem('wk_tender_radar_last_errors', JSON.stringify(errors));
+    } catch(e) {}
+    showMsg(saved.length ? `✅ تم جلب ${saved.length} فرصة من اعتماد` : 'تم الفحص ولم تظهر فرص جديدة مطابقة');
+    render();
+  } catch(e) {
+    showMsg('⚠️ فشل جلب اعتماد: ' + e.message);
+    render();
   }
-  saveTenders();
-  showMsg('✅ تم تحويل مسار البحث إلى بطاقة متابعة');
-  render();
 }
 
 function tenderMatchesProduct(t) {
@@ -2553,51 +2465,31 @@ function renderAssetsAndTenders() {
     <div class="tender-chip-grid">
       ${TENDER_PLATFORMS.map(p => `<button class="btn-secondary" onclick="openTenderPlatform('${p.id}')">${p.name}</button>`).join('')}
     </div>
-    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد للمنافسات الحكومية، تنافس لمشتريات القطاع غير الربحي، فرص للفرص الاستثمارية والبلدية، فرص الترفيه للفعاليات، وبحث الإنترنت للعملاء المحتملين.</div>`;
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد يعمل بجلب فعلي. تنافس وفرص وفرص الترفيه مصادر رسمية للمتابعة ونربط جلبها عند توفر API أو endpoint مناسب.</div>`;
   const tenderKeywords = document.getElementById('tender-keywords');
   if (tenderKeywords) tenderKeywords.innerHTML = `
     <div class="tender-chip-grid">
       ${TENDER_KEYWORDS.map((k, i) => `<span class="tender-chip">${k}</span>`).join('')}
     </div>
-    <div class="text-secondary" style="font-size:11px;margin-top:8px">يتم استبعاد: ${TENDER_NEGATIVE_KEYWORDS.slice(0, 8).join('، ')}</div>
-    <div class="tender-chip-grid">
-      ${TENDER_KEYWORDS.slice(0, 6).map((k, i) => `<button class="btn-sync" onclick="openAllTenderSearches(${i})">بحث: ${k}</button>`).join('')}
-    </div>`;
+    <div class="text-secondary" style="font-size:11px;margin-top:8px">يتم الجلب فعلياً من اعتماد، ويتم استبعاد: ${TENDER_NEGATIVE_KEYWORDS.slice(0, 8).join('، ')}</div>`;
   const radarBox = document.getElementById('tender-radar-results');
   if (radarBox) {
     const radarDate = (() => { try { return localStorage.getItem('wk_tender_radar_date') || ''; } catch(e) { return ''; } })();
-    const queries = getTenderRadarQueries();
+    const lastCount = (() => { try { return localStorage.getItem('wk_tender_radar_last_count') || ''; } catch(e) { return ''; } })();
+    const lastErrors = (() => { try { return JSON.parse(localStorage.getItem('wk_tender_radar_last_errors') || '[]'); } catch(e) { return []; } })();
     radarBox.innerHTML = `
       <div class="section" style="margin-bottom:12px">
         <div class="flex-between mb-12">
           <div>
-            <div style="font-size:14px;font-weight:600">إيجنت البحث اليومي</div>
-            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر تشغيل: ' + radarDate : 'اضغط تشغيل الرادار لتجهيز بحث اليوم'}</div>
+            <div style="font-size:14px;font-weight:600">رصد اعتماد الفعلي</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر فحص: ' + radarDate + (lastCount ? ' — نتائج محفوظة/محدثة: ' + lastCount : '') : 'اضغط تشغيل الرادار لجلب المنافسات من اعتماد'}</div>
           </div>
           <div class="flex gap-6">
-            <button class="btn-secondary" onclick="runTenderRadar()">تحديث البحث</button>
-            ${queries[0] ? `<button class="btn-sync" onclick="openRadarQuery(0)">افتح أول بحث</button>` : ''}
+            <button class="btn-sync" onclick="runTenderRadar()">جلب اعتماد الآن</button>
           </div>
         </div>
-        ${queries.length ? `
-          <div class="grid-2">
-            ${queries.slice(0, 10).map((q, i) => `
-              <div class="stat-card">
-                <div class="flex-between mb-8">
-                  <div style="font-weight:600;font-size:13px">${q.title}</div>
-                  ${statusPill(TENDER_TYPE_LABELS[q.type] || 'فرصة', q.type === 'lead' ? '#85B7EB' : q.type === 'event' ? '#FAC775' : '#5DCAA5')}
-                </div>
-                <div class="text-secondary" style="font-size:11px;line-height:1.7">${q.reason}</div>
-                <div class="text-secondary" style="font-size:11px;margin-top:6px">الإجراء: ${q.action}</div>
-                <div class="flex gap-6 mt-8">
-                  <button class="btn-secondary" onclick="openRadarQuery(${i})">فتح البحث</button>
-                  ${can('tenders') ? `<button class="btn-primary" onclick="saveRadarCandidate(${i})">أضف للمتابعة</button>` : ''}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-          ${queries.length > 10 ? `<div class="text-secondary" style="font-size:11px;margin-top:8px">تم تجهيز ${queries.length} مسار. يظهر أول 10 لتسهيل المتابعة اليومية.</div>` : ''}
-        ` : '<div class="text-secondary" style="font-size:12px">لم يتم تجهيز بحث اليوم بعد.</div>'}
+        <div class="text-secondary" style="font-size:12px;line-height:1.8">هذا الفحص لا يفتح قوقل. النظام يتصل بمصدر اعتماد العام، يفلتر الفرص المناسبة للخيام الأوروبية والفعاليات، ثم يحفظها في البطاقات أدناه.</div>
+        ${lastErrors.length ? `<div class="text-secondary" style="font-size:11px;margin-top:8px;color:#EF9F27">تنبيه: تعذر فحص بعض الكلمات مؤقتاً (${lastErrors.length}).</div>` : ''}
       </div>`;
   }
   if (tender) tender.innerHTML = tenders.map(t => {

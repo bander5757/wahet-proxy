@@ -166,6 +166,7 @@ create table if not exists tenders (
   entity_name text,
   source_name text,
   source_url text,
+  external_key text,
   matched_keyword text,
   opportunity_type text not null default 'tender'
     check (opportunity_type in ('tender', 'lead', 'site', 'event')),
@@ -181,6 +182,7 @@ create table if not exists tenders (
 );
 
 alter table tenders add column if not exists opportunity_type text not null default 'tender';
+alter table tenders add column if not exists external_key text;
 alter table tenders add column if not exists suggested_action text;
 alter table tenders add column if not exists follow_status text not null default 'new';
 alter table tenders add column if not exists last_seen_at timestamptz not null default now();
@@ -193,3 +195,4 @@ create index if not exists idx_staff_documents_expires_on on staff_documents(exp
 create index if not exists idx_vehicle_tasks_due_on on vehicle_tasks(due_on);
 create index if not exists idx_general_alerts_due_on on general_alerts(due_on);
 create index if not exists idx_tenders_due_on on tenders(due_on);
+create unique index if not exists idx_tenders_external_key on tenders(external_key) where external_key is not null;

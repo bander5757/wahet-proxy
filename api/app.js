@@ -37,6 +37,31 @@ const TENDER_STATUS_MAP = {
   "تحتاج مراجعة": "review",
 };
 const TENDER_STATUS_LABELS = Object.fromEntries(Object.entries(TENDER_STATUS_MAP).map(([label, key]) => [key, label]));
+const RADAR_KEYWORDS = [
+  "خيام",
+  "خيمة",
+  "خيم",
+  "فعاليات",
+  "مؤتمرات",
+  "معارض",
+  "اللقاءات",
+  "ورش العمل",
+  "ضيافة",
+  "استقبال",
+  "مهرجان",
+  "مخيم",
+];
+const RADAR_NEGATIVE_WORDS = [
+  "قطع غيار",
+  "سيارات",
+  "نظافة",
+  "تقنية المعلومات",
+  "رخص رقمية",
+  "طباعة",
+  "فريون",
+  "قواعد البيانات",
+  "معدات التحقق",
+];
 
 let pool;
 
@@ -171,6 +196,7 @@ function tenderRow(row) {
     entity: row.entity_name || "",
     platform: row.source_name || "",
     url: row.source_url || "#",
+    externalKey: row.external_key || "",
     keyword: row.matched_keyword || "",
     type: row.opportunity_type || "tender",
     due: row.due_on || "",
@@ -471,7 +497,7 @@ async function deleteGeneralAlert(client, id) {
 
 async function listTenders(client) {
   const result = await client.query(`
-    select id, title, entity_name, source_name, source_url, matched_keyword,
+    select id, title, entity_name, source_name, source_url, external_key, matched_keyword,
            opportunity_type, due_on::text, fit_status, fit_reason, decision,
            suggested_action, follow_status, last_seen_at, created_at
     from tenders
@@ -490,10 +516,10 @@ async function createTender(client, payload) {
   }
   const result = await client.query(
     `insert into tenders
-      (title, entity_name, source_name, source_url, matched_keyword, opportunity_type,
+      (title, entity_name, source_name, source_url, external_key, matched_keyword, opportunity_type,
        due_on, fit_status, fit_reason, suggested_action, follow_status, decision)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     returning id, title, entity_name, source_name, source_url, matched_keyword,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     returning id, title, entity_name, source_name, source_url, external_key, matched_keyword,
                opportunity_type, due_on::text, fit_status, fit_reason, decision,
                suggested_action, follow_status, last_seen_at, created_at`,
     [
@@ -501,6 +527,7 @@ async function createTender(client, payload) {
       payload.entity || payload.entity_name || null,
       payload.platform || payload.source_name || null,
       payload.url || payload.source_url || null,
+      payload.externalKey || payload.external_key || null,
       payload.keyword || payload.matched_keyword || null,
       payload.type || payload.opportunity_type || "tender",
       payload.due || payload.due_on || null,
@@ -526,7 +553,7 @@ async function updateTenderScore(client, payload) {
     `update tenders
      set fit_status = $1
      where id = $2
-     returning id, title, entity_name, source_name, source_url, matched_keyword,
+     returning id, title, entity_name, source_name, source_url, external_key, matched_keyword,
                opportunity_type, due_on::text, fit_status, fit_reason, decision,
                suggested_action, follow_status, last_seen_at, created_at`,
     [status, id]
@@ -542,6 +569,118 @@ async function updateTenderScore(client, payload) {
 async function deleteTender(client, id) {
   const result = await client.query("delete from tenders where id = $1 returning id", [id]);
   return Boolean(result.rows[0]);
+}
+
+function textIncludesAny(text, words) {
+  const value = String(text || "").toLowerCase();
+  return words.some((word) => value.includes(String(word).toLowerCase()));
+}
+
+function radarTenderFit(item, keyword) {
+  const text = [item.tenderName, item.tenderActivityName, item.agencyName, item.tenderTypeName].filter(Boolean).join(" ");
+  if (textIncludesAny(text, RADAR_NEGATIVE_WORDS)) return null;
+  const strong = textIncludesAny(text, ["خيام", "خيمة", "خيم", "مخيم"]);
+  const event = textIncludesAny(text, ["فعاليات", "مؤتمرات", "معارض", "اللقاءات", "ورش العمل", "ضيافة", "استقبال", "مهرجان"]);
+  if (!strong && !event) return null;
+  return {
+    status: strong ? "fit" : "review",
+    action: strong ? "تجهيز عرض سعر" : "مراجعة الرابط",
+    reason: strong
+      ? `مطابقة قوية لكلمة ${keyword}: ${item.tenderActivityName || item.tenderTypeName || "منافسة اعتماد"}`
+      : `فرصة محتملة مرتبطة بالفعاليات أو الضيافة: ${item.tenderActivityName || item.tenderTypeName || "منافسة اعتماد"}`,
+  };
+}
+
+function etimadSearchUrl(keyword) {
+  const params = new URLSearchParams({
+    PageNumber: "1",
+    PageSize: "10",
+    IsSearch: "true",
+    multipleSearch: keyword,
+  });
+  return `https://tenders.etimad.sa/Tender/AllTendersForVisitor?${params.toString()}`;
+}
+
+async function fetchEtimadKeyword(keyword) {
+  const params = new URLSearchParams({
+    PageNumber: "1",
+    PageSize: "10",
+    IsSearch: "true",
+    multipleSearch: keyword,
+  });
+  const url = `https://tenders.etimad.sa/Tender/AllSupplierTendersForVisitorAsync?${params.toString()}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      Referer: "https://tenders.etimad.sa/Tender",
+      "X-Requested-With": "XMLHttpRequest",
+      "User-Agent": "WahetKhaimaRadar/1.0",
+    },
+  });
+  if (!response.ok) throw new Error(`فشل جلب اعتماد لكلمة ${keyword}`);
+  const text = await response.text();
+  if (!text.trim().startsWith("{")) {
+    throw new Error(`رد اعتماد غير متوقع لكلمة ${keyword}`);
+  }
+  const data = JSON.parse(text);
+  return Array.isArray(data.data) ? data.data : [];
+}
+
+async function scanEtimadTenders(client) {
+  const seen = new Map();
+  const errors = [];
+  for (const keyword of RADAR_KEYWORDS) {
+    try {
+      const rows = await fetchEtimadKeyword(keyword);
+      for (const item of rows) {
+        const key = `etimad:${item.tenderId || item.referenceNumber || item.tenderNumber}`;
+        if (!key || seen.has(key)) continue;
+        const fit = radarTenderFit(item, keyword);
+        if (!fit) continue;
+        seen.set(key, { item, keyword, fit });
+      }
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+
+  const saved = [];
+  for (const { item, keyword, fit } of seen.values()) {
+    const externalKey = `etimad:${item.tenderId || item.referenceNumber || item.tenderNumber}`;
+    const sourceUrl = etimadSearchUrl(keyword);
+    const result = await client.query(
+      `insert into tenders
+        (title, entity_name, source_name, source_url, external_key, matched_keyword,
+         opportunity_type, due_on, fit_status, fit_reason, suggested_action, follow_status, decision, last_seen_at)
+       values ($1, $2, 'اعتماد', $3, $4, $5, 'tender', $6, $7, $8, $9, 'new', $10, now())
+       on conflict (external_key) where external_key is not null
+       do update set
+         source_url = excluded.source_url,
+         matched_keyword = excluded.matched_keyword,
+         fit_status = case when tenders.fit_status = 'not_fit' then tenders.fit_status else excluded.fit_status end,
+         fit_reason = excluded.fit_reason,
+         suggested_action = excluded.suggested_action,
+         last_seen_at = now()
+       returning id, title, entity_name, source_name, source_url, external_key, matched_keyword,
+                 opportunity_type, due_on::text, fit_status, fit_reason, decision,
+                 suggested_action, follow_status, last_seen_at, created_at`,
+      [
+        item.tenderName || "منافسة اعتماد",
+        item.agencyName || item.branchName || "",
+        sourceUrl,
+        externalKey,
+        keyword,
+        item.lastOfferPresentationDate ? String(item.lastOfferPresentationDate).slice(0, 10) : null,
+        fit.status,
+        `${fit.reason}. رقم المنافسة: ${item.referenceNumber || item.tenderNumber || item.tenderId}. نوعها: ${item.tenderTypeName || "غير محدد"}.`,
+        fit.action,
+        `نشاط اعتماد: ${item.tenderActivityName || "غير محدد"}`,
+      ]
+    );
+    saved.push(tenderRow(result.rows[0]));
+  }
+
+  return { saved, errors, keywords: RADAR_KEYWORDS };
 }
 
 async function getSetting(client, key) {
@@ -980,6 +1119,11 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/tenders/delete") {
       await deleteTender(client, String(req.body?.id || ""));
       return res.status(200).json({ ok: true });
+    }
+
+    if ((req.method === "POST" || req.method === "GET") && path === "/tenders/radar-scan") {
+      const radar = await scanEtimadTenders(client);
+      return res.status(200).json({ ok: true, data: radar });
     }
 
     if (req.method === "GET" && path === "/settings/daftra") {
