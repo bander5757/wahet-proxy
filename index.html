@@ -330,6 +330,16 @@
       <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
     </div>
     <div id="finance-summary" class="grid-4"></div>
+    <div id="bank-accounts-section" class="section" style="margin-top:12px;display:none">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">الحسابات البنكية</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">الأرصدة محسوبة من الرصيد الابتدائي والحركات المعتمدة</div>
+        </div>
+        <button class="btn-secondary" onclick="addBankAccount()">+ حساب</button>
+      </div>
+      <div id="bank-accounts-view"></div>
+    </div>
     <div class="section" style="margin-top:12px">
       <div class="flex-between mb-12">
         <div>
@@ -348,12 +358,19 @@
         </div>
         <div>
           <div class="label">إملاء صوتي مباشر</div>
-          <button class="btn-secondary" style="width:100%" onclick="startWhatsappDictation()">بدء الإملاء</button>
+          <button class="btn-secondary" style="width:100%;font-size:20px;line-height:1"
+            onmousedown="startWhatsappDictation()" onmouseup="stopWhatsappDictation()" onmouseleave="stopWhatsappDictation()"
+            ontouchstart="event.preventDefault();startWhatsappDictation()" ontouchend="event.preventDefault();stopWhatsappDictation()"
+            title="اضغط واستمر للتحدث">🎙️</button>
         </div>
       </div>
       <div>
         <div class="label" id="wa-text-label">انسخ من واتساب والصق هنا</div>
         <textarea id="wa-entry-text" rows="4" placeholder="مثال: حولت لعمر 500 ريال عهدة تركيب خيمة في العليا"></textarea>
+      </div>
+      <div class="grid-2 mt-8">
+        <div><div class="label">من أي حساب</div><select id="wa-entry-account"></select></div>
+        <div><div class="label">نوع الصرف عند الحاجة</div><select id="wa-entry-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
       </div>
       <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
         <button class="btn-secondary" onclick="previewWhatsappEntry()">تحليل الرسالة</button>
@@ -574,6 +591,26 @@
   </div>
 </div>
 
+<div id="custody-spend-modal" class="modal-overlay" style="display:none" onclick="closeCustodySpendModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">تفريغ صرف عهدة</div>
+        <div id="custody-spend-subtitle" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
+      </div>
+      <button class="btn-secondary" onclick="closeCustodySpendModal()">إغلاق</button>
+    </div>
+    <input id="custody-spend-entry-id" type="hidden">
+    <div class="grid-2" style="margin-bottom:10px">
+      <div><div class="label">مبلغ الصرف</div><input id="custody-spend-amount" type="number" inputmode="decimal"></div>
+      <div><div class="label">نوع الصرف</div><select id="custody-spend-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
+      <div style="grid-column:1/-1"><div class="label">شرح الصرف</div><textarea id="custody-spend-note" rows="3" placeholder="مثال: شراء قطعة غيار"></textarea></div>
+      <div style="grid-column:1/-1"><div class="label">إرفاق فاتورة أو تصوير بالكاميرا</div><input id="custody-spend-file" type="file" accept="image/*,.pdf" capture="environment"></div>
+    </div>
+    <button class="btn-green" style="width:100%;padding:11px" onclick="saveCustodySpend()">حفظ تفريغ الصرف</button>
+  </div>
+</div>
+
 <button class="btn-green quick-fab" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
 
 <div class="bottom-nav" id="bottom-nav">
@@ -626,6 +663,10 @@ let bankStatementRows = [];
 try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
 let bankStatementMeta = {};
 try { bankStatementMeta = JSON.parse(localStorage.getItem('wk_bank_statement_meta') || '{}'); } catch(e) { bankStatementMeta = {}; }
+let bankAccounts = [];
+try { bankAccounts = JSON.parse(localStorage.getItem('wk_bank_accounts') || '[]'); } catch(e) { bankAccounts = []; }
+let custodySpends = {};
+try { custodySpends = JSON.parse(localStorage.getItem('wk_custody_spends') || '{}'); } catch(e) { custodySpends = {}; }
 let lastAccountingReport = '';
 let staffDocs = [];
 try { staffDocs = JSON.parse(localStorage.getItem('wk_staff_docs') || '[]'); } catch(e) { staffDocs = []; }
@@ -835,6 +876,75 @@ function closeSideMenu() {
   document.getElementById('side-menu')?.classList.remove('open');
   document.getElementById('side-menu-overlay')?.classList.remove('open');
 }
+
+function refreshFinanceAccountSelects() {
+  normalizeBankAccounts();
+  const options = bankAccounts.map(a => `<option>${htmlEscape(a.name)}</option>`).join('');
+  ['q-account','wa-entry-account','receipt-account'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const current = el.value;
+    el.innerHTML = options;
+    if (current && bankAccounts.some(a => a.name === current)) el.value = current;
+  });
+}
+
+function accountBalance(accountName) {
+  normalizeBankAccounts();
+  const account = bankAccounts.find(a => a.name === accountName);
+  const opening = account ? Number(account.openingBalance) || 0 : 0;
+  return approvedFinanceEntries().reduce((balance, e) => {
+    if ((e.account || 'الحساب الرسمي') !== accountName) return balance;
+    const amount = Number(e.amount) || 0;
+    if (e.type === 'إيراد') return balance + amount;
+    if (['مصروف','عهدة','سلفة','تحويل'].includes(e.type)) return balance - amount;
+    return balance;
+  }, opening);
+}
+
+function addBankAccount() {
+  if (!can('bankAccounts')) { showMsg('إدارة الحسابات متاحة لبندر وابو فايز والمحاسب فقط'); return; }
+  const name = prompt('اسم الحساب البنكي');
+  if (!name || !name.trim()) return;
+  normalizeBankAccounts();
+  if (bankAccounts.some(a => a.name === name.trim())) { showMsg('هذا الحساب موجود'); return; }
+  const opening = Number(prompt('الرصيد الابتدائي للحساب', '0') || 0) || 0;
+  bankAccounts.push({ id: 'acc_' + Date.now(), name: name.trim(), openingBalance: opening });
+  persistFinanceMeta().then(() => renderFinance());
+}
+
+function updateBankOpening(id) {
+  if (!can('bankAccounts')) return;
+  const account = bankAccounts.find(a => a.id === id);
+  if (!account) return;
+  const value = Number(prompt('الرصيد الابتدائي: ' + account.name, String(account.openingBalance || 0)) || 0) || 0;
+  account.openingBalance = value;
+  persistFinanceMeta().then(() => renderFinance());
+}
+
+function renderBankAccounts() {
+  const section = document.getElementById('bank-accounts-section');
+  const view = document.getElementById('bank-accounts-view');
+  if (!section || !view) return;
+  if (!can('bankAccounts')) {
+    section.style.display = 'none';
+    return;
+  }
+  normalizeBankAccounts();
+  section.style.display = '';
+  view.innerHTML = `
+    <div class="grid-4">
+      ${bankAccounts.map(a => `<div class="stat-card">
+        <div class="flex-between" style="gap:8px">
+          <div class="label">${htmlEscape(a.name)}</div>
+          <button class="btn-secondary" style="padding:2px 7px;font-size:11px" onclick="updateBankOpening('${a.id}')">الرصيد</button>
+        </div>
+        <div style="font-size:19px;font-weight:800;color:${accountBalance(a.name) >= 0 ? '#5DCAA5' : '#E24B4A'}">${money(accountBalance(a.name))}</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:4px">ابتدائي: ${money(a.openingBalance)}</div>
+      </div>`).join('')}
+    </div>`;
+  refreshFinanceAccountSelects();
+}
 const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب' || c.stage === 'مكتمل');
 const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
 const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!followupDate(c) || followupDate(c) >= FOLLOWUP_START_DATE);
@@ -859,6 +969,39 @@ const saveBankStatement = () => {
   try { localStorage.setItem('wk_bank_statement_rows', JSON.stringify(bankStatementRows)); } catch(e) {}
   try { localStorage.setItem('wk_bank_statement_meta', JSON.stringify(bankStatementMeta || {})); } catch(e) {}
 };
+const defaultBankAccounts = () => [
+  { id: 'acc_official', name: 'الحساب الرسمي', openingBalance: 0 },
+  { id: 'acc_secondary', name: 'الحساب الفرعي', openingBalance: 0 },
+  { id: 'acc_cash', name: 'كاش', openingBalance: 0 }
+];
+const normalizeBankAccounts = () => {
+  if (!Array.isArray(bankAccounts) || !bankAccounts.length) bankAccounts = defaultBankAccounts();
+  const seen = new Set();
+  bankAccounts = bankAccounts
+    .map((a, i) => ({
+      id: a.id || 'acc_' + Date.now() + '_' + i,
+      name: String(a.name || '').trim(),
+      openingBalance: Number(a.openingBalance) || 0
+    }))
+    .filter(a => a.name && !seen.has(a.name) && seen.add(a.name));
+  if (!bankAccounts.length) bankAccounts = defaultBankAccounts();
+};
+const saveFinanceMetaLocal = () => {
+  normalizeBankAccounts();
+  try { localStorage.setItem('wk_bank_accounts', JSON.stringify(bankAccounts)); } catch(e) {}
+  try { localStorage.setItem('wk_custody_spends', JSON.stringify(custodySpends || {})); } catch(e) {}
+};
+async function persistFinanceMeta() {
+  saveFinanceMetaLocal();
+  if (!apiOnline) return false;
+  try {
+    await apiRequest('/finance-meta', { method: 'POST', body: JSON.stringify({ bankAccounts, custodySpends }) });
+    return true;
+  } catch(e) {
+    showMsg('⚠️ تم حفظ بيانات الحسابات والعهد محلياً، وتعذر حفظها في قاعدة البيانات');
+    return false;
+  }
+}
 const saveStaffDocs = () => {
   try { localStorage.setItem('wk_staff_docs', JSON.stringify(staffDocs)); } catch(e) {}
 };
@@ -948,6 +1091,14 @@ async function loadAppData() {
         analysis: data.bankStatement.analysis || null
       };
       saveBankStatement();
+    }
+    if (data.financeMeta) {
+      if (Array.isArray(data.financeMeta.bankAccounts)) bankAccounts = data.financeMeta.bankAccounts;
+      if (data.financeMeta.custodySpends && typeof data.financeMeta.custodySpends === 'object') custodySpends = data.financeMeta.custodySpends;
+      saveFinanceMetaLocal();
+    } else {
+      normalizeBankAccounts();
+      saveFinanceMetaLocal();
     }
     showMsg('✅ قاعدة البيانات متصلة');
   } catch(e) {
@@ -1067,6 +1218,7 @@ function can(action) {
     quickEntry: ['owner', 'viewer', 'supervisor', 'accountant'],
     approveFinance: ['owner', 'accountant', 'viewer'],
     finance: ['owner', 'viewer', 'supervisor', 'accountant'],
+    bankAccounts: ['owner', 'viewer', 'accountant'],
     assetManage: ['owner', 'supervisor'],
     tenders: ['owner'],
   };
@@ -1677,6 +1829,7 @@ function setTab(tab) {
 }
 
 function openQuickEntry(type) {
+  refreshFinanceAccountSelects();
   document.getElementById('quick-entry').style.display = 'flex';
   if (type) document.getElementById('q-type').value = type;
   setTimeout(() => document.getElementById('q-amount')?.focus(), 50);
@@ -1728,6 +1881,7 @@ async function saveQuickEntry() {
 
 let whatsappEntryMode = 'text';
 let whatsappEntryPreview = null;
+let whatsappRecognition = null;
 
 function setWhatsappEntryMode(mode) {
   whatsappEntryMode = mode === 'voice' ? 'voice' : 'text';
@@ -1739,6 +1893,7 @@ function setWhatsappEntryMode(mode) {
   if (textBtn) textBtn.className = whatsappEntryMode === 'text' ? 'btn-primary' : 'btn-secondary';
   if (voiceBtn) voiceBtn.className = whatsappEntryMode === 'voice' ? 'btn-primary' : 'btn-secondary';
   if (label) label.textContent = whatsappEntryMode === 'voice' ? 'نص الصوت بعد التفريغ' : 'انسخ من واتساب والصق هنا';
+  refreshFinanceAccountSelects();
 }
 
 function normalizeArabicDigits(value) {
@@ -1793,12 +1948,14 @@ function inferWhatsappAmount(text) {
 function parseWhatsappFinanceText(rawText) {
   const text = normalizeArabicDigits(rawText).trim();
   const amount = inferWhatsappAmount(text);
+  const account = document.getElementById('wa-entry-account')?.value || 'الحساب الرسمي';
+  const selectedCategory = document.getElementById('wa-entry-category')?.value || '';
   return {
     type: inferWhatsappType(text),
     amount,
-    account: 'الحساب الرسمي',
+    account,
     person: inferWhatsappPerson(text),
-    category: inferWhatsappCategory(text),
+    category: selectedCategory || inferWhatsappCategory(text),
     note: text,
     attachment: document.getElementById('wa-audio-file')?.files?.[0]?.name || '',
     created: new Date().toISOString(),
@@ -1822,6 +1979,7 @@ function previewWhatsappEntry() {
         <div><div class="label">النوع</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.type)}</div></div>
         <div><div class="label">المبلغ</div><div style="font-weight:700">${whatsappEntryPreview.amount ? money(whatsappEntryPreview.amount) : 'لم يتم العثور على مبلغ'}</div></div>
         <div><div class="label">الشخص</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.person || 'غير محدد')}</div></div>
+        <div><div class="label">من أي حساب</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.account)}</div></div>
         <div><div class="label">التصنيف</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.category)}</div></div>
       </div>
       <div class="text-secondary" style="font-size:12px;margin-top:8px">سيتم حفظها كمسودة فقط، ولا تدخل في التقارير المعتمدة حتى يتم اعتمادها.</div>
@@ -1860,25 +2018,83 @@ async function saveWhatsappDraft() {
   showMsg((savedRemote ? '✅ تم إنشاء مسودة من الواتساب' : '✅ تم إنشاء مسودة واتساب محلية') + ': ' + savedEntry.type + ' — ' + money(savedEntry.amount));
 }
 
+async function createFinanceEntry(entry, successText) {
+  let savedRemote = false;
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/finance', { method: 'POST', body: JSON.stringify(entry) });
+      financeEntries.unshift(res.data);
+      savedRemote = true;
+    } catch(e) {
+      apiOnline = false;
+      financeEntries.unshift(entry);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً كمسودة');
+    }
+  } else {
+    financeEntries.unshift(entry);
+  }
+  saveFinance();
+  renderFinance();
+  showMsg((savedRemote ? '✅ ' : '✅ محلياً: ') + successText);
+}
+
+async function recordClientReceipt(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return;
+  normalizeBankAccounts();
+  const amount = Number(prompt('كم الدفعة المستلمة من ' + (client.name || 'العميل') + '؟', String(client.deposit || client.remaining || client.offerPrice || 0)) || 0) || 0;
+  if (!amount) { showMsg('أدخل مبلغ الدفعة'); return; }
+  const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
+  const selected = Number(prompt('اختر رقم الحساب:\n' + accountNames, '1') || 1) - 1;
+  const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
+  await createFinanceEntry({
+    id: 'fin_receipt_' + Date.now(),
+    type: 'إيراد',
+    amount,
+    account,
+    person: client.name || '',
+    note: 'دفعة مستلمة على عرض/فاتورة: ' + (client.name || '') + (client.daftraNo ? ' #' + client.daftraNo : ''),
+    category: 'إيراد تأجير',
+    attachment: '',
+    created: new Date().toISOString(),
+    createdBy: currentUser?.name || 'مدخل',
+    status: 'draft'
+  }, 'تم تسجيل دفعة كمسودة: ' + money(amount) + ' في ' + account);
+}
+
 function startWhatsappDictation() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     showMsg('الإملاء الصوتي غير مدعوم في هذا المتصفح. اكتب التفريغ أو الصق نص الرسالة.');
     return;
   }
+  if (whatsappRecognition) return;
   const recognition = new SpeechRecognition();
+  whatsappRecognition = recognition;
   recognition.lang = 'ar-SA';
-  recognition.interimResults = false;
+  recognition.interimResults = true;
   recognition.maxAlternatives = 1;
   recognition.onresult = event => {
-    const transcript = event.results?.[0]?.[0]?.transcript || '';
+    const transcript = Array.from(event.results || []).map(r => r?.[0]?.transcript || '').join(' ').trim();
     const target = document.getElementById('wa-entry-text');
-    if (target) target.value = (target.value ? target.value + '\n' : '') + transcript;
-    previewWhatsappEntry();
+    if (target && transcript) target.value = transcript;
   };
-  recognition.onerror = () => showMsg('تعذر الإملاء الصوتي. جرّب إدخال النص يدوياً.');
+  recognition.onend = () => {
+    whatsappRecognition = null;
+    if ((document.getElementById('wa-entry-text')?.value || '').trim()) previewWhatsappEntry();
+  };
+  recognition.onerror = () => {
+    whatsappRecognition = null;
+    showMsg('تعذر الإملاء الصوتي. جرّب إدخال النص يدوياً.');
+  };
   recognition.start();
-  showMsg('جاري الاستماع الآن...');
+  showMsg('تحدث الآن، وارفع إصبعك عن المايك عند الانتهاء');
+}
+
+function stopWhatsappDictation() {
+  if (!whatsappRecognition) return;
+  try { whatsappRecognition.stop(); } catch(e) {}
+  whatsappRecognition = null;
 }
 
 async function setFinanceStatus(id, status) {
@@ -2217,6 +2433,135 @@ function financeStatusLabel(status) {
 }
 function financeStatusColor(status) {
   return status === 'approved' ? '#5DCAA5' : status === 'rejected' ? '#E24B4A' : '#FAC775';
+}
+
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function inMonth(date, key = currentMonthKey()) {
+  return dateOnly(date).slice(0, 7) === key;
+}
+
+function custodySpendLines(entryId) {
+  return Array.isArray(custodySpends?.[entryId]) ? custodySpends[entryId] : [];
+}
+
+function custodySpent(entryId) {
+  return custodySpendLines(entryId).reduce((sum, x) => sum + (Number(x.amount) || 0), 0);
+}
+
+function custodyRemaining(entry) {
+  return Math.max(0, (Number(entry.amount) || 0) - custodySpent(entry.id));
+}
+
+function custodyClosed(entry) {
+  return custodyRemaining(entry) <= 0.5;
+}
+
+function addCustodySpend(entryId) {
+  const entry = financeEntries.find(e => e.id === entryId);
+  if (!entry) return;
+  document.getElementById('custody-spend-entry-id').value = entryId;
+  document.getElementById('custody-spend-subtitle').textContent = (entry.person || 'بدون مستلم') + ' — المتبقي: ' + money(custodyRemaining(entry));
+  ['custody-spend-amount','custody-spend-note','custody-spend-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('custody-spend-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('custody-spend-amount')?.focus(), 50);
+}
+
+function closeCustodySpendModal() {
+  document.getElementById('custody-spend-modal').style.display = 'none';
+}
+
+async function saveCustodySpend() {
+  const entryId = document.getElementById('custody-spend-entry-id')?.value || '';
+  const entry = financeEntries.find(e => e.id === entryId);
+  if (!entry) return;
+  const amount = Number(document.getElementById('custody-spend-amount')?.value || 0) || 0;
+  const note = (document.getElementById('custody-spend-note')?.value || '').trim();
+  const category = document.getElementById('custody-spend-category')?.value || 'أخرى';
+  const file = document.getElementById('custody-spend-file')?.files?.[0];
+  if (!amount) { showMsg('أدخل مبلغ الصرف'); return; }
+  if (!note) { showMsg('أدخل شرح الصرف'); return; }
+  if (amount > custodyRemaining(entry)) { showMsg('مبلغ الصرف أكبر من المتبقي في العهدة'); return; }
+  custodySpends[entryId] = custodySpendLines(entryId).concat([{
+    id: 'spend_' + Date.now(),
+    amount,
+    category,
+    note,
+    attachment: file ? file.name : '',
+    created: new Date().toISOString(),
+    createdBy: currentUser?.name || 'مدخل'
+  }]);
+  await persistFinanceMeta();
+  closeCustodySpendModal();
+  renderFinance();
+  showMsg('تم تفريغ صرف من العهدة: ' + money(amount));
+}
+
+function renderMonthlyFinanceTables() {
+  const approved = approvedFinanceEntries();
+  const month = currentMonthKey();
+  const directExpenses = approved.filter(e => e.type === 'مصروف' && inMonth(e.created, month));
+  const custodyEntries = approved.filter(e => e.type === 'عهدة');
+  const monthCustody = custodyEntries.filter(e => inMonth(e.created, month));
+  const monthCustodySpends = custodyEntries.flatMap(e => custodySpendLines(e.id).map(line => ({ ...line, custody: e }))).filter(x => inMonth(x.created, month));
+  const directTotal = directExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const custodySpentTotal = monthCustodySpends.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const custodyIssuedTotal = monthCustody.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const custodyClosedTotal = monthCustody.filter(custodyClosed).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const custodyRemainingTotal = custodyEntries.reduce((s, e) => s + custodyRemaining(e), 0);
+  const openCustodyTotal = custodyEntries.filter(e => !custodyClosed(e)).reduce((s, e) => s + custodyRemaining(e), 0);
+  return `
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">جدول المصاريف والعهد</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">الشهر الحالي: ${month}</div>
+        </div>
+      </div>
+      <div class="grid-4">
+        <div class="stat-card"><div class="label">مصاريف مباشرة</div><div style="font-size:18px;font-weight:800;color:#FAC775">${money(directTotal)}</div></div>
+        <div class="stat-card"><div class="label">تفريغ/إغلاق من العهد</div><div style="font-size:18px;font-weight:800;color:#FAC775">${money(custodySpentTotal)}</div></div>
+        <div class="stat-card"><div class="label">عهد مصروفة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:#E24B4A">${money(custodyIssuedTotal)}</div></div>
+        <div class="stat-card"><div class="label">عهد مغلقة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:#5DCAA5">${money(custodyClosedTotal)}</div></div>
+        <div class="stat-card"><div class="label">متبقي عهد مفتوحة</div><div style="font-size:18px;font-weight:800;color:${openCustodyTotal ? '#E24B4A' : '#5DCAA5'}">${money(custodyRemainingTotal)}</div></div>
+      </div>
+      <div class="grid-2 mt-8">
+        <div class="stat-card">
+          <div class="label">بنود المصاريف المباشرة</div>
+          ${directExpenses.length ? directExpenses.map(e => `<div class="list-row">
+            <div><div style="font-weight:700">${money(e.amount)} — ${htmlEscape(e.category || 'أخرى')}</div><div class="text-secondary" style="margin-top:3px">${htmlEscape(e.note || '')}</div></div>
+            <div class="text-secondary">${dateOnly(e.created)}</div>
+          </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصاريف مباشرة هذا الشهر</div>'}
+        </div>
+        <div class="stat-card">
+          <div class="label">العهد</div>
+          ${custodyEntries.length ? custodyEntries.map(e => {
+            const lines = custodySpendLines(e.id);
+            const remaining = custodyRemaining(e);
+            return `<div style="border:0.5px solid ${custodyClosed(e) ? '#5DCAA5' : '#E24B4A'}55;border-radius:8px;padding:9px 10px;margin-bottom:8px;background:${custodyClosed(e) ? '#effaf5' : '#fff3f3'}">
+              <div class="flex-between" style="gap:8px">
+                <div>
+                  <div style="font-weight:800">${htmlEscape(e.person || 'بدون مستلم')} — ${money(e.amount)}</div>
+                  <div class="text-secondary" style="font-size:11px;margin-top:3px">${dateOnly(e.created)} — من ${htmlEscape(e.account || 'الحساب الرسمي')}</div>
+                </div>
+                ${statusPill(custodyClosed(e) ? 'مغلقة' : 'مفتوحة', custodyClosed(e) ? '#5DCAA5' : '#E24B4A')}
+              </div>
+              <div class="grid-2 mt-8">
+                <div><div class="label">المصروف</div><div style="font-weight:700">${money(custodySpent(e.id))}</div></div>
+                <div><div class="label">المتبقي</div><div style="font-weight:700;color:${remaining ? '#E24B4A' : '#5DCAA5'}">${money(remaining)}</div></div>
+              </div>
+              ${lines.length ? `<div style="margin-top:8px">${lines.map(line => `<div class="list-row" style="padding:6px 0">
+                <div><div style="font-weight:700">${money(line.amount)} — ${htmlEscape(line.category || 'أخرى')}</div><div class="text-secondary" style="margin-top:2px">${htmlEscape(line.note || '')}${line.attachment ? ' — مرفق: ' + htmlEscape(line.attachment) : ''}</div></div>
+                <div class="text-secondary">${dateOnly(line.created)}</div>
+              </div>`).join('')}</div>` : '<div class="text-secondary" style="font-size:12px;margin-top:8px">لم يتم تفريغ صرف هذه العهدة</div>'}
+              ${remaining ? `<button class="btn-secondary" style="width:100%;margin-top:8px" onclick="addCustodySpend('${e.id}')">تفريغ صرف</button>` : ''}
+            </div>`;
+          }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد عهد معتمدة</div>'}
+        </div>
+      </div>
+    </div>`;
 }
 
 function parseCsvLine(line) {
@@ -2608,20 +2953,24 @@ function renderExecutive() {
 }
 
 function renderFinance() {
+  normalizeBankAccounts();
   const approved = approvedFinanceEntries();
   const drafts = draftFinanceEntries();
   const sum = financeTotals(approved);
   const allSum = financeTotals();
   const week = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
+  const openCustody = approved.filter(e => e.type === 'عهدة').reduce((total, e) => total + custodyRemaining(e), 0);
   const summary = document.getElementById('finance-summary');
   if (summary) summary.innerHTML = [
     ['إيرادات معتمدة', money(sum.income), 'success'],
     ['مصروفات معتمدة', money(sum.out), 'warning'],
     ['مسودات تحتاج اعتماد', drafts.length, 'danger'],
-    ['عهد مفتوحة', money(allSum.custody), 'info'],
+    ['عهد مفتوحة', money(openCustody), 'info'],
   ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:18px;font-weight:700;color:${t==='success'?'#5DCAA5':t==='warning'?'#FAC775':t==='danger'?'#E24B4A':'#85B7EB'}">${v}</div></div>`).join('');
+  renderBankAccounts();
   const list = document.getElementById('finance-list');
   if (list) list.innerHTML = `
+    ${renderMonthlyFinanceTables()}
     ${drafts.length && can('approveFinance') ? `
       <div style="background:#1f0e0e;border:0.5px solid #E24B4A55;border-radius:8px;padding:10px 12px;margin:10px 0">
         <div style="font-size:13px;font-weight:700;color:#E24B4A;margin-bottom:3px">حركات بانتظار الاعتماد</div>
@@ -2892,6 +3241,7 @@ function showModal(id) {
       ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
       ${!taxInvoice && c.stage !== 'استغنى' ? `<button class="btn-secondary" style="flex:1;color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>` : ''}
       ${c.stage === 'استغنى' ? `<button class="btn-secondary" style="flex:1" onclick="reopenQuote('${c.id}')">إرجاع للمتابعة</button>` : ''}
+      ${confirmed ? `<button class="btn-secondary" style="flex:1" onclick="recordClientReceipt('${c.id}')">تسجيل دفعة</button>` : ''}
       ${nextStage && !(c.stage === 'عرض_سعر' && !confirmed) ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
       ${c.phone ? `<button class="btn-green" style="flex:1" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name} 👋\\nتواصل معك فريق واحة الخيمة 🏕️'))">واتساب</button>` : ''}
       <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>

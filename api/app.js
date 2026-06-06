@@ -280,15 +280,21 @@ async function login(client, payload) {
 }
 
 async function requireDefaultAccount(client, accountName) {
-  const type = accountName === "الحساب الفرعي" ? "secondary" : accountName === "كاش" ? "cash" : "official";
+  const name = String(accountName || "الحساب الرسمي").trim() || "الحساب الرسمي";
+  const exact = await client.query(
+    "select id from bank_accounts where name = $1 and is_active = true order by created_at asc limit 1",
+    [name]
+  );
+  if (exact.rows[0]) return exact.rows[0].id;
+  const type = name === "الحساب الفرعي" ? "secondary" : name === "كاش" ? "cash" : "official";
   const found = await client.query(
-    "select id from bank_accounts where account_type = $1 and is_active = true order by created_at asc limit 1",
-    [type]
+    "select id from bank_accounts where account_type = $1 and name = $2 and is_active = true order by created_at asc limit 1",
+    [type, name]
   );
   if (found.rows[0]) return found.rows[0].id;
   const inserted = await client.query(
     "insert into bank_accounts (name, account_type) values ($1, $2) returning id",
-    [accountName || "الحساب الرسمي", type]
+    [name, type]
   );
   return inserted.rows[0].id;
 }
@@ -754,6 +760,25 @@ async function setBankStatementCache(client, payload) {
   return setSetting(client, "bank_statement_cache", cache);
 }
 
+async function getFinanceMeta(client) {
+  const meta = await getSetting(client, "finance_meta");
+  if (!meta || typeof meta !== "object") return { bankAccounts: [], custodySpends: {} };
+  return {
+    bankAccounts: Array.isArray(meta.bankAccounts) ? meta.bankAccounts : [],
+    custodySpends: meta.custodySpends && typeof meta.custodySpends === "object" ? meta.custodySpends : {},
+    updatedAt: meta.updatedAt || null,
+  };
+}
+
+async function setFinanceMeta(client, payload) {
+  const meta = {
+    bankAccounts: Array.isArray(payload.bankAccounts) ? payload.bankAccounts : [],
+    custodySpends: payload.custodySpends && typeof payload.custodySpends === "object" ? payload.custodySpends : {},
+    updatedAt: new Date().toISOString(),
+  };
+  return setSetting(client, "finance_meta", meta);
+}
+
 async function syncDaftraClientsCache(client) {
   const cfg = await getSetting(client, "daftra");
   if (!cfg?.subdomain || !cfg?.apikey) {
@@ -1009,6 +1034,7 @@ async function dashboard(client, user) {
   const daftraSettings = await getSetting(client, "daftra");
   const daftraClientsCache = await getDaftraClientsCache(client);
   const bankStatement = await getBankStatementCache(client);
+  const financeMeta = await getFinanceMeta(client);
   const users = await client.query(
     "select id, name, phone, email, role, is_active from app_users where is_active = true order by created_at asc"
   );
@@ -1027,6 +1053,7 @@ async function dashboard(client, user) {
       counts: daftraClientsCache.counts,
     },
     bankStatement,
+    financeMeta,
     settings: {
       daftra: daftraSettings,
     },
@@ -1162,6 +1189,15 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/bank-statement") {
       const saved = await setBankStatementCache(client, req.body || {});
+      return res.status(200).json({ ok: true, data: saved });
+    }
+
+    if (req.method === "GET" && path === "/finance-meta") {
+      return res.status(200).json({ ok: true, data: await getFinanceMeta(client) });
+    }
+
+    if (req.method === "POST" && path === "/finance-meta") {
+      const saved = await setFinanceMeta(client, req.body || {});
       return res.status(200).json({ ok: true, data: saved });
     }
 
