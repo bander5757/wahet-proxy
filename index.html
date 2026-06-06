@@ -2158,7 +2158,8 @@ function inDateRange(date, start, end) {
 }
 
 function findBankMatches(row) {
-  const amount = Math.abs(row.amount);
+  if (!row || !Number.isFinite(Number(row.amount))) return [];
+  const amount = Math.abs(Number(row.amount));
   const sameDirection = financeEntries.filter(e => {
     if ((e.status || 'draft') === 'rejected') return false;
     const isOut = ['مصروف','عهدة','سلفة','تحويل'].includes(e.type);
@@ -2179,14 +2180,24 @@ function buildAccountingAnalysis() {
   const weekly = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
   const outputVat = quarterInvoices.reduce((sum, c) => sum + ((Number(c.offerPrice) || 0) * 15 / 115), 0);
   const inputVatEstimate = quarterExpenses.reduce((sum, e) => sum + ((Number(e.amount) || 0) * 15 / 115), 0);
-  const bankMatches = bankStatementRows.map((row, index) => ({ row, index, matches: findBankMatches(row) }));
+  const cleanBankRows = (Array.isArray(bankStatementRows) ? bankStatementRows : [])
+    .map((row, index) => ({
+      row: {
+        date: dateOnly(row?.date) || '',
+        description: firstText(row?.description, row?.note, row?.memo, row?.details, 'بدون بيان'),
+        amount: Number(row?.amount) || 0
+      },
+      index
+    }))
+    .filter(x => x.row.amount !== 0);
+  const bankMatches = cleanBankRows.map(x => ({ ...x, matches: findBankMatches(x.row) }));
   const unmatchedBank = bankMatches.filter(x => !x.matches.length);
   const matchedBank = bankMatches.filter(x => x.matches.length);
   const risks = [];
   if (quarterConfirmedUnbilled.length) risks.push(quarterConfirmedUnbilled.length + ' عروض مؤكدة غير مفوترة ضريبياً، لا تدخلها في الإقرار قبل المراجعة');
   if (draftFinanceEntries().length) risks.push(draftFinanceEntries().length + ' حركات مالية بانتظار الاعتماد');
   if (unmatchedBank.length) risks.push(unmatchedBank.length + ' حركة بنكية غير مطابقة في الكشف');
-  if (!bankStatementRows.length) risks.push('لم يتم إدخال كشف بنك للمطابقة');
+  if (!cleanBankRows.length) risks.push('لم يتم إدخال كشف بنك للمطابقة');
   return {
     qr,
     quarterInvoices,
@@ -2799,35 +2810,46 @@ function renderClientOverview() {
 }
 
 function render() {
-  renderClientOverview();
-  // كانبان
-  const kanban = document.getElementById('kanban');
-  kanban.innerHTML = STAGES.map(s => {
-    const cols = clients.filter(c => c.stage === s);
-    return `<div>
-      <div class="flex-between mb-8">
-        <span style="font-size:12px;font-weight:500;color:${CTXT[s]}">${LABELS[s]}</span>
-        <span class="badge" style="background:${COLORS[s]};color:${CTXT[s]}">${cols.length}</span>
-      </div>
-      <div class="kanban-col" style="background:#13161f;border:0.5px solid #2e3244;border-radius:10px;padding:8px">
-        ${cols.map(c => {
-          const d = daysUntil(c.installDate);
-          const urgent = d !== null && d <= 2 && d >= 0;
-          return `<div class="card client-card" style="border-color:${urgent?'#EF9F27':'#2e3244'}" onclick="showModal('${c.id}')">
-            <div class="flex-between mb-8">
-              <span style="font-size:13px;font-weight:500">${c.name}</span>
-              <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${isConfirmedSale(c)?'#0d2a1b':c.source==='daftra'?'#1a2e1a':'#1a1a2e'};color:${isConfirmedSale(c)?'#5DCAA5':c.source==='daftra'?'#5DCAA5':'#85B7EB'}">${isTaxInvoice(c)?'فاتورة':isConfirmedSale(c)?'مؤكد':c.source==='daftra'?'دفترة':'يدوي'}</span>
-            </div>
-            ${c.daftraNo?`<div style="font-size:11px;color:#5DCAA5;margin-bottom:3px">#${c.daftraNo}</div>`:''}
-            <div class="flex-between">
-              <span style="font-size:13px;font-weight:500;color:#5DCAA5">${c.offerPrice.toLocaleString()} ر.س</span>
-              ${urgent?`<span style="font-size:11px;color:#FAC775">بعد ${d} يوم</span>`:''}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }).join('');
+  const safe = (name, fn, fallbackId) => {
+    try { fn(); }
+    catch(e) {
+      console.error(name, e);
+      const el = fallbackId ? document.getElementById(fallbackId) : null;
+      if (el) el.innerHTML = `<div class="section"><div style="font-size:13px;font-weight:700;color:#E24B4A">تعذر عرض هذا القسم مؤقتاً</div><div class="text-secondary" style="font-size:12px;margin-top:4px">${htmlEscape(e.message || 'خطأ غير معروف')}</div></div>`;
+      showMsg('⚠️ تعذر تحديث قسم: ' + name);
+    }
+  };
+  safe('متابعة العملاء', renderClientOverview, 'pending-quotes-list');
+  safe('كانبان العملاء', () => {
+    const kanban = document.getElementById('kanban');
+    if (!kanban) return;
+    kanban.innerHTML = STAGES.map(s => {
+      const cols = clients.filter(c => c.stage === s);
+      return `<div>
+        <div class="flex-between mb-8">
+          <span style="font-size:12px;font-weight:500;color:${CTXT[s]}">${LABELS[s]}</span>
+          <span class="badge" style="background:${COLORS[s]};color:${CTXT[s]}">${cols.length}</span>
+        </div>
+        <div class="kanban-col" style="background:#13161f;border:0.5px solid #2e3244;border-radius:10px;padding:8px">
+          ${cols.map(c => {
+            const d = daysUntil(c.installDate);
+            const urgent = d !== null && d <= 2 && d >= 0;
+            return `<div class="card client-card" style="border-color:${urgent?'#EF9F27':'#2e3244'}" onclick="showModal('${c.id}')">
+              <div class="flex-between mb-8">
+                <span style="font-size:13px;font-weight:500">${htmlEscape(c.name || 'عميل')}</span>
+                <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:${isConfirmedSale(c)?'#0d2a1b':c.source==='daftra'?'#1a2e1a':'#1a1a2e'};color:${isConfirmedSale(c)?'#5DCAA5':c.source==='daftra'?'#5DCAA5':'#85B7EB'}">${isTaxInvoice(c)?'فاتورة':isConfirmedSale(c)?'مؤكد':c.source==='daftra'?'دفترة':'يدوي'}</span>
+              </div>
+              ${c.daftraNo?`<div style="font-size:11px;color:#5DCAA5;margin-bottom:3px">#${htmlEscape(c.daftraNo)}</div>`:''}
+              <div class="flex-between">
+                <span style="font-size:13px;font-weight:500;color:#5DCAA5">${money(c.offerPrice)}</span>
+                ${urgent?`<span style="font-size:11px;color:#FAC775">بعد ${d} يوم</span>`:''}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }, 'kanban');
 
   // تنبيهات
   const notifs = clients.flatMap(c => {
@@ -2875,11 +2897,14 @@ function render() {
     return a;
   });
   const nb = document.getElementById('notif-badge');
-  nb.style.display = notifs.length ? 'flex' : 'none';
-  nb.textContent = notifs.length;
+  if (nb) {
+    nb.style.display = notifs.length ? 'flex' : 'none';
+    nb.textContent = notifs.length;
+  }
   const nbg = {warning:'#2a1f00',info:'#001a2e',success:'#001a0e',omar:'#271500'};
   const ntx = {warning:'#FAC775',info:'#85B7EB',success:'#5DCAA5',omar:'#EF9F27'};
-  document.getElementById('notif-list').innerHTML = notifs.length ? notifs.map(n =>
+  const notifList = document.getElementById('notif-list');
+  if (notifList) notifList.innerHTML = notifs.length ? notifs.map(n =>
     `<div class="notif" style="background:${nbg[n.type]};${n.type==='omar'?'border:0.5px solid #EF9F2750;border-radius:8px':''}">
       <span>${n.type==='warning'?'⚠️':n.type==='info'?'💰':n.type==='omar'?'👷':'🔧'}</span>
       <div style="flex:1">
@@ -2893,17 +2918,18 @@ function render() {
   // إحصاءات
   const confirmedRevenue = clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0);
   const taxInvoiceRevenue = clients.filter(isTaxInvoice).reduce((s,c)=>s+c.offerPrice,0);
-  document.getElementById('stats').innerHTML = [
+  const statsEl = document.getElementById('stats');
+  if (statsEl) statsEl.innerHTML = [
     ['العملاء', clients.length, ''],
     ['دخل التأجير المؤكد', confirmedRevenue.toLocaleString()+' ر.س', 'success'],
     ['فواتير ضريبية', taxInvoiceRevenue.toLocaleString()+' ر.س', 'info'],
     ['انتظار موافقة', clients.filter(isActiveFollowupQuote).length, 'warning'],
   ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:500;color:${t==='warning'?'#FAC775':t==='success'?'#5DCAA5':t==='info'?'#85B7EB':'#e8e6e1'}">${v}</div></div>`).join('');
-  renderDashboard();
-  renderExecutive();
-  renderFinance();
-  renderOperations();
-  renderAssetsAndTenders();
+  safe('لوحة اليوم', renderDashboard, 'daily-content');
+  safe('الرئيسية', renderExecutive, 'executive-dashboard');
+  safe('المحاسبة', renderFinance, 'finance-list');
+  safe('التركيبات', renderOperations, 'install-list');
+  safe('الموظفين والمنافسات', renderAssetsAndTenders, 'tender-list');
 }
 
 function showMsg(t) {
