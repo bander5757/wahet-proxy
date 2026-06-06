@@ -333,6 +333,37 @@
     <div class="section" style="margin-top:12px">
       <div class="flex-between mb-12">
         <div>
+          <div style="font-size:15px;font-weight:600">إضافة من الواتساب</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">تحويل رسالة أو صوت واتساب إلى مسودة مالية للمراجعة</div>
+        </div>
+      </div>
+      <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+        <button id="wa-mode-text" class="btn-primary" onclick="setWhatsappEntryMode('text')">نص</button>
+        <button id="wa-mode-voice" class="btn-secondary" onclick="setWhatsappEntryMode('voice')">صوت</button>
+      </div>
+      <div id="wa-voice-tools" class="grid-2" style="display:none;margin-bottom:10px">
+        <div>
+          <div class="label">ملف صوت واتساب</div>
+          <input id="wa-audio-file" type="file" accept="audio/*">
+        </div>
+        <div>
+          <div class="label">إملاء صوتي مباشر</div>
+          <button class="btn-secondary" style="width:100%" onclick="startWhatsappDictation()">بدء الإملاء</button>
+        </div>
+      </div>
+      <div>
+        <div class="label" id="wa-text-label">انسخ من واتساب والصق هنا</div>
+        <textarea id="wa-entry-text" rows="4" placeholder="مثال: حولت لعمر 500 ريال عهدة تركيب خيمة في العليا"></textarea>
+      </div>
+      <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
+        <button class="btn-secondary" onclick="previewWhatsappEntry()">تحليل الرسالة</button>
+        <button class="btn-green" onclick="saveWhatsappDraft()">إنشاء مسودة</button>
+      </div>
+      <div id="wa-entry-preview" class="mt-8"></div>
+    </div>
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
           <div style="font-size:15px;font-weight:600">المحاسب الذكي</div>
           <div style="font-size:11px;color:#9a9898;margin-top:2px">مطابقة كشف البنك، ضريبة الربع، وتقرير أسبوعي جاهز للمراجعة</div>
         </div>
@@ -1693,6 +1724,161 @@ async function saveQuickEntry() {
   closeQuickEntry();
   showMsg((savedRemote ? '✅ تم حفظ الحركة في قاعدة البيانات' : '✅ تم حفظ الحركة محلياً') + ': ' + type + ' — ' + money(amount));
   setTab('finance');
+}
+
+let whatsappEntryMode = 'text';
+let whatsappEntryPreview = null;
+
+function setWhatsappEntryMode(mode) {
+  whatsappEntryMode = mode === 'voice' ? 'voice' : 'text';
+  const voiceTools = document.getElementById('wa-voice-tools');
+  const textBtn = document.getElementById('wa-mode-text');
+  const voiceBtn = document.getElementById('wa-mode-voice');
+  const label = document.getElementById('wa-text-label');
+  if (voiceTools) voiceTools.style.display = whatsappEntryMode === 'voice' ? 'grid' : 'none';
+  if (textBtn) textBtn.className = whatsappEntryMode === 'text' ? 'btn-primary' : 'btn-secondary';
+  if (voiceBtn) voiceBtn.className = whatsappEntryMode === 'voice' ? 'btn-primary' : 'btn-secondary';
+  if (label) label.textContent = whatsappEntryMode === 'voice' ? 'نص الصوت بعد التفريغ' : 'انسخ من واتساب والصق هنا';
+}
+
+function normalizeArabicDigits(value) {
+  const arabic = '٠١٢٣٤٥٦٧٨٩';
+  const persian = '۰۱۲۳۴۵۶۷۸۹';
+  return String(value || '').replace(/[٠-٩]/g, d => arabic.indexOf(d)).replace(/[۰-۹]/g, d => persian.indexOf(d));
+}
+
+function inferWhatsappType(text) {
+  const t = text.toLowerCase();
+  if (/عهدة|عهده|سلفة تشغيل|سلفه تشغيل/.test(t)) return 'عهدة';
+  if (/سلفة|سلفه/.test(t)) return 'سلفة';
+  if (/دين|مديونية|مديونيه|التزام/.test(t)) return 'دين';
+  if (/إيراد|ايراد|دخل|سداد|سدّد|تحصيل|دفعة|دفعه/.test(t)) return 'إيراد';
+  if (/تحويل/.test(t) && !/فاتورة|فاتوره|مصروف|شراء|بنزين|ديزل|عامل|عمال|مواد/.test(t)) return 'تحويل';
+  return 'مصروف';
+}
+
+function inferWhatsappPerson(text) {
+  const names = ['عمر', 'بندر', 'ابو فايز', 'أبو فايز', 'صدام', 'المشرف', 'المحاسب'];
+  return names.find(n => text.includes(n)) || '';
+}
+
+function inferWhatsappCategory(text) {
+  const t = text.toLowerCase();
+  if (/بنزين|ديزل|زيت|سيارة|سياره|صيانة|صيانه/.test(t)) return 'سيارات';
+  if (/عامل|عمال|راتب|اجرة|أجرة|يومية|يوميه/.test(t)) return 'عمالة';
+  if (/تركيب|فك|موقع|خيمة|خيمه|خيام/.test(t)) return 'تركيب';
+  if (/حديد|خشب|قماش|مواد|شراء|توريد/.test(t)) return 'مواد';
+  if (/اعلان|إعلان|قوقل|تسويق/.test(t)) return 'تسويق';
+  if (/مكتب|رسوم|اشتراك|إدارة|ادارة/.test(t)) return 'إدارة';
+  return 'أخرى';
+}
+
+function inferWhatsappAmount(text) {
+  const withCurrency = [...text.matchAll(/([0-9]+(?:[,.][0-9]{1,2})?)\s*(?:ر\.?س|ريال|sar)/gi)]
+    .map(m => Number(m[1].replace(',', '.')))
+    .filter(n => n > 0);
+  if (withCurrency.length) return withCurrency[0];
+  const withAmountWord = [...text.matchAll(/(?:مبلغ|المبلغ|حولت|تحويل|سداد|مصروف|عهدة|عهده)\s*([0-9]+(?:[,.][0-9]{1,2})?)/gi)]
+    .map(m => Number(m[1].replace(',', '.')))
+    .filter(n => n > 0);
+  if (withAmountWord.length) return withAmountWord[0];
+  const candidates = [...text.matchAll(/[0-9]+(?:[,.][0-9]{1,2})?/g)]
+    .map(m => m[0])
+    .filter(v => v.replace(/[,.]/g, '').length <= 7)
+    .map(v => Number(v.replace(',', '.')))
+    .filter(n => n > 0);
+  return candidates[0] || 0;
+}
+
+function parseWhatsappFinanceText(rawText) {
+  const text = normalizeArabicDigits(rawText).trim();
+  const amount = inferWhatsappAmount(text);
+  return {
+    type: inferWhatsappType(text),
+    amount,
+    account: 'الحساب الرسمي',
+    person: inferWhatsappPerson(text),
+    category: inferWhatsappCategory(text),
+    note: text,
+    attachment: document.getElementById('wa-audio-file')?.files?.[0]?.name || '',
+    created: new Date().toISOString(),
+    createdBy: currentUser?.name || 'مدخل',
+    status: 'draft'
+  };
+}
+
+function previewWhatsappEntry() {
+  const text = document.getElementById('wa-entry-text')?.value || '';
+  const box = document.getElementById('wa-entry-preview');
+  if (!text.trim()) {
+    showMsg(whatsappEntryMode === 'voice' ? 'أدخل نص الصوت بعد التفريغ أو استخدم الإملاء' : 'انسخ نص رسالة الواتساب أولاً');
+    return null;
+  }
+  whatsappEntryPreview = parseWhatsappFinanceText(text);
+  if (box) box.innerHTML = `
+    <div class="stat-card">
+      <div class="label">نتيجة التحليل قبل الحفظ</div>
+      <div class="grid-2 mt-8">
+        <div><div class="label">النوع</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.type)}</div></div>
+        <div><div class="label">المبلغ</div><div style="font-weight:700">${whatsappEntryPreview.amount ? money(whatsappEntryPreview.amount) : 'لم يتم العثور على مبلغ'}</div></div>
+        <div><div class="label">الشخص</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.person || 'غير محدد')}</div></div>
+        <div><div class="label">التصنيف</div><div style="font-weight:700">${htmlEscape(whatsappEntryPreview.category)}</div></div>
+      </div>
+      <div class="text-secondary" style="font-size:12px;margin-top:8px">سيتم حفظها كمسودة فقط، ولا تدخل في التقارير المعتمدة حتى يتم اعتمادها.</div>
+    </div>`;
+  return whatsappEntryPreview;
+}
+
+async function saveWhatsappDraft() {
+  const entry = previewWhatsappEntry();
+  if (!entry) return;
+  if (!entry.amount) { showMsg('أدخل مبلغ واضح في الرسالة قبل إنشاء المسودة'); return; }
+  const savedEntry = { ...entry, id: 'fin_wa_' + Date.now() };
+  let savedRemote = false;
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/finance', { method: 'POST', body: JSON.stringify(savedEntry) });
+      financeEntries.unshift(res.data);
+      savedRemote = true;
+    } catch(e) {
+      apiOnline = false;
+      financeEntries.unshift(savedEntry);
+      showMsg('⚠️ تعذر الحفظ في قاعدة البيانات، تم الحفظ محلياً كمسودة');
+    }
+  } else {
+    financeEntries.unshift(savedEntry);
+  }
+  saveFinance();
+  whatsappEntryPreview = null;
+  const text = document.getElementById('wa-entry-text');
+  const file = document.getElementById('wa-audio-file');
+  const preview = document.getElementById('wa-entry-preview');
+  if (text) text.value = '';
+  if (file) file.value = '';
+  if (preview) preview.innerHTML = '';
+  renderFinance();
+  showMsg((savedRemote ? '✅ تم إنشاء مسودة من الواتساب' : '✅ تم إنشاء مسودة واتساب محلية') + ': ' + savedEntry.type + ' — ' + money(savedEntry.amount));
+}
+
+function startWhatsappDictation() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showMsg('الإملاء الصوتي غير مدعوم في هذا المتصفح. اكتب التفريغ أو الصق نص الرسالة.');
+    return;
+  }
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'ar-SA';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onresult = event => {
+    const transcript = event.results?.[0]?.[0]?.transcript || '';
+    const target = document.getElementById('wa-entry-text');
+    if (target) target.value = (target.value ? target.value + '\n' : '') + transcript;
+    previewWhatsappEntry();
+  };
+  recognition.onerror = () => showMsg('تعذر الإملاء الصوتي. جرّب إدخال النص يدوياً.');
+  recognition.start();
+  showMsg('جاري الاستماع الآن...');
 }
 
 async function setFinanceStatus(id, status) {
