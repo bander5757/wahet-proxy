@@ -2179,7 +2179,7 @@ function buildAccountingAnalysis() {
   const weekly = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
   const outputVat = quarterInvoices.reduce((sum, c) => sum + ((Number(c.offerPrice) || 0) * 15 / 115), 0);
   const inputVatEstimate = quarterExpenses.reduce((sum, e) => sum + ((Number(e.amount) || 0) * 15 / 115), 0);
-  const bankMatches = bankStatementRows.map(row => ({ row, matches: findBankMatches(row) }));
+  const bankMatches = bankStatementRows.map((row, index) => ({ row, index, matches: findBankMatches(row) }));
   const unmatchedBank = bankMatches.filter(x => !x.matches.length);
   const matchedBank = bankMatches.filter(x => x.matches.length);
   const risks = [];
@@ -2301,9 +2301,52 @@ function renderSmartAccounting() {
       <div class="flex-between mb-12"><div style="font-size:14px;font-weight:700">حركات البنك غير المطابقة</div><span class="badge" style="background:#1a3a5c;color:#85B7EB">${a.unmatchedBank.length}</span></div>
       ${a.unmatchedBank.slice(0, 10).map(x => `<div class="list-row">
         <div><div style="font-weight:600">${x.row.date || 'بدون تاريخ'} — ${money(Math.abs(x.row.amount))}</div><div class="text-secondary" style="margin-top:3px">${htmlEscape(x.row.description || 'بدون بيان')}</div></div>
-        ${statusPill(x.row.amount >= 0 ? 'إيداع' : 'سحب', x.row.amount >= 0 ? '#5DCAA5' : '#E24B4A')}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${statusPill(x.row.amount >= 0 ? 'إيداع' : 'سحب', x.row.amount >= 0 ? '#5DCAA5' : '#E24B4A')}
+          <button class="btn-secondary" onclick="createFinanceFromBank(${x.index})">إنشاء قيد مسودة</button>
+        </div>
       </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد حركات غير مطابقة أو لم يتم إدخال كشف بنك</div>'}
     </div>`;
+}
+
+async function createFinanceFromBank(index) {
+  const row = bankStatementRows[index];
+  if (!row) return;
+  const amount = Math.abs(Number(row.amount) || 0);
+  if (!amount) { showMsg('⚠️ لا يمكن إنشاء قيد بدون مبلغ'); return; }
+  const type = row.amount >= 0 ? 'إيراد' : 'مصروف';
+  const createdDate = dateOnly(row.date) || localDateString(new Date());
+  const entry = {
+    id: 'fin_bank_' + Date.now(),
+    type,
+    amount,
+    account: 'الحساب الرسمي',
+    person: '',
+    note: 'من كشف البنك: ' + (row.description || 'بدون بيان'),
+    category: 'أخرى',
+    attachment: bankStatementMeta?.fileName || '',
+    created: createdDate + 'T12:00:00.000Z',
+    createdBy: currentUser?.name || 'المحاسب الذكي',
+    status: 'draft'
+  };
+  let savedRemote = false;
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/finance', { method: 'POST', body: JSON.stringify(entry) });
+      financeEntries.unshift(res.data);
+      savedRemote = true;
+    } catch(e) {
+      apiOnline = false;
+      financeEntries.unshift(entry);
+      showMsg('⚠️ تعذر حفظ القيد في قاعدة البيانات، تم حفظه محلياً كمسودة');
+    }
+  } else {
+    financeEntries.unshift(entry);
+  }
+  saveFinance();
+  renderSmartAccounting();
+  renderFinance();
+  showMsg((savedRemote ? '✅ تم إنشاء قيد مسودة من كشف البنك' : '✅ تم إنشاء قيد محلي من كشف البنك') + ': ' + type + ' — ' + money(amount));
 }
 
 async function copyAccountingReport() {
@@ -2627,10 +2670,19 @@ function showModal(id) {
     <div class="flex-between mb-12">
       <div>
         <div style="font-size:16px;font-weight:700">${c.name}</div>
-        <div style="font-size:12px;color:#667085;margin-top:3px">${c.phone ? '<span dir="ltr">'+c.phone+'</span>' : 'رقم الجوال غير موجود في دفترة'}</div>
         ${c.daftraNo ? '<div style="font-size:11px;color:#5DCAA5;margin-top:3px">دفترة #'+c.daftraNo+'</div>' : ''}
       </div>
       <span class="badge" style="background:${COLORS[c.stage]};color:${CTXT[c.stage]}">${LABELS[c.stage]}</span>
+    </div>
+    <div class="grid-2" style="margin-bottom:10px">
+      <div style="background:#f7f9fb;border:0.5px solid #d8e0e7;border-radius:8px;padding:10px 12px">
+        <div class="label">اسم العميل</div>
+        <div style="font-size:15px;font-weight:800;line-height:1.6">${htmlEscape(c.name || 'عميل')}</div>
+      </div>
+      <div style="background:#f7f9fb;border:0.5px solid #d8e0e7;border-radius:8px;padding:10px 12px">
+        <div class="label">رقم الجوال</div>
+        <div dir="ltr" style="font-size:16px;font-weight:800;line-height:1.6;text-align:left;letter-spacing:0">${c.phone ? htmlEscape(c.phone) : 'غير موجود في دفترة'}</div>
+      </div>
     </div>
     <div class="flex gap-6" style="flex-wrap:wrap;margin-bottom:10px">
       ${statusPill(confirmed ? 'عرض مؤكد' : 'غير مؤكد', confirmed ? '#5DCAA5' : '#FAC775')}
