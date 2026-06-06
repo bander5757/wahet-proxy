@@ -2730,11 +2730,12 @@ function renderClientOverview() {
   pendingCount.textContent = pending.length;
   pendingEl.innerHTML = pending.length ? pending.map(c => {
     const followText = quoteFollowupAgeLabel(c);
+    const updatedLabel = c.updatedAt && c.updatedAt !== c.created ? ' — آخر تعديل: ' + c.updatedAt : '';
     return `<div class="card followup-card" style="margin-bottom:8px">
       <div class="flex-between mb-8" style="gap:10px">
         <div>
           <div style="font-size:14px;font-weight:700">${c.name || 'عميل'}</div>
-          <div class="text-secondary" style="font-size:11px;margin-top:3px">${c.daftraNo ? 'عرض #' + c.daftraNo + ' — ' : ''}تاريخ العرض: ${c.created || 'بدون تاريخ'}${wasUpdated ? ' — آخر تعديل: ' + c.updatedAt : ''}</div>
+          <div class="text-secondary" style="font-size:11px;margin-top:3px">${c.daftraNo ? 'عرض #' + c.daftraNo + ' — ' : ''}تاريخ العرض: ${c.created || 'بدون تاريخ'}${updatedLabel}</div>
         </div>
         <span class="badge" style="background:#E24B4A;color:#fff">${followText}</span>
       </div>
