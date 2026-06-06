@@ -28,6 +28,6 @@
     }
   ],
   "crons": [
-    { "path": "/api/app/tenders/radar-scan", "schedule": "0 6,12,18 * * *" }
+    { "path": "/api/app/tenders/radar-scan", "schedule": "0 6 * * *" }
   ]
 }
