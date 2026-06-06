@@ -646,6 +646,25 @@ const localDateString = date => {
   return `${y}-${m}-${d}`;
 };
 const htmlEscape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[ch]));
+const arabicDayLabel = days => {
+  if (days === null || days === undefined || Number.isNaN(days)) return 'يحتاج متابعة';
+  if (days <= 0) return 'وصل اليوم';
+  if (days === 1) return 'مضى يوم';
+  if (days === 2) return 'مضى يومان';
+  if (days <= 10) return 'مضى ' + days + ' أيام';
+  return 'مضى ' + days + ' يوم';
+};
+const quoteFollowupAgeLabel = c => {
+  const base = followupDate(c);
+  const days = daysOld(base);
+  const edited = c.updatedAt && c.updatedAt !== c.created;
+  const label = arabicDayLabel(days);
+  if (edited && days <= 0) return 'تعديل اليوم';
+  if (edited && days === 1) return 'مضى يوم على آخر تعديل';
+  if (edited && days === 2) return 'مضى يومان على آخر تعديل';
+  if (edited && days > 2) return label + ' على آخر تعديل';
+  return label;
+};
 const stripHtml = value => String(value || '')
   .replace(/<br\s*\/?>/gi, '\n')
   .replace(/<\/p>/gi, '\n')
@@ -1556,7 +1575,7 @@ function renderDashboard() {
     ${secHdr('#E24B4A','🔴','عروض بدون متابعة — أكثر من 3 أيام', stale.length)}
     ${stale.length ? stale.map(c => card(
       '#E24B4A','#1f0e0e', c.name,
-      sub(c,false), 'منذ '+(daysOld(followupDate(c))||0)+' يوم',
+      sub(c,false), quoteFollowupAgeLabel(c),
       c.id,
       c.phone ? waBtn('واتساب',"waMsg('new','"+c.id+"')") : '',
       "contactClient('"+c.id+"')"
@@ -2624,7 +2643,7 @@ function showModal(id) {
       ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
       ${!taxInvoice && c.stage !== 'استغنى' ? `<button class="btn-secondary" style="flex:1;color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>` : ''}
       ${c.stage === 'استغنى' ? `<button class="btn-secondary" style="flex:1" onclick="reopenQuote('${c.id}')">إرجاع للمتابعة</button>` : ''}
-      ${nextStage ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
+      ${nextStage && !(c.stage === 'عرض_سعر' && !confirmed) ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
       ${c.phone ? `<button class="btn-green" style="flex:1" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name} 👋\\nتواصل معك فريق واحة الخيمة 🏕️'))">واتساب</button>` : ''}
       <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>
     </div>`;
@@ -2647,10 +2666,7 @@ function renderClientOverview() {
 
   pendingCount.textContent = pending.length;
   pendingEl.innerHTML = pending.length ? pending.map(c => {
-    const activity = followupDate(c);
-    const old = daysOld(activity);
-    const wasUpdated = c.updatedAt && c.updatedAt !== c.created;
-    const followText = old === null ? 'يحتاج متابعة' : old <= 0 ? (wasUpdated ? 'تعديل اليوم' : 'وصل اليوم') : (wasUpdated ? 'تعديل منذ ' + old + ' يوم' : 'منذ ' + old + ' يوم');
+    const followText = quoteFollowupAgeLabel(c);
     return `<div class="card followup-card" style="margin-bottom:8px">
       <div class="flex-between mb-8" style="gap:10px">
         <div>
