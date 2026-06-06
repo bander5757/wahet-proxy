@@ -446,10 +446,10 @@
     <div class="flex-between mb-12">
       <div>
         <div style="font-size:15px;font-weight:600">رادار المنافسات</div>
-        <div style="font-size:11px;color:#9a9898;margin-top:2px">رصد يومي للخيام الأوروبية في اعتماد، تنافس، فرص، والإنترنت</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">جلب وتنبيه فعلي من اعتماد للفرص المناسبة للخيام الأوروبية والفعاليات</div>
       </div>
       <div class="flex gap-6">
-        <button class="btn-sync" data-action="tenders" onclick="runTenderRadar()">تشغيل الرادار</button>
+        <button class="btn-sync" data-action="tenders" onclick="runTenderRadar()">جلب اعتماد الآن</button>
         <button class="btn-secondary" data-action="tenders" onclick="toggleTenderForm()">+ فرصة</button>
       </div>
     </div>
@@ -471,7 +471,7 @@
         <div><div class="label">نوع الفرصة</div><select id="tender-type"><option value="tender">منافسة</option><option value="lead">عميل محتمل</option><option value="site">موقع/فرصة تشغيل</option><option value="event">فعالية</option></select></div>
         <div><div class="label">آخر موعد</div><input id="tender-due" type="date"></div>
         <div><div class="label">التقييم</div><select id="tender-score"><option>تحتاج مراجعة</option><option>مناسبة</option><option>غير مناسبة</option></select></div>
-        <div><div class="label">المصدر</div><select id="tender-platform"><option>اعتماد</option><option>تنافس</option><option>فرص</option><option>فرص الترفيه</option><option>بحث الإنترنت</option><option>أخرى</option></select></div>
+        <div><div class="label">المصدر</div><select id="tender-platform"><option>اعتماد</option><option>تنافس</option><option>فرص</option><option>فرص الترفيه</option><option>أخرى</option></select></div>
         <div><div class="label">الكلمة المطابقة</div><select id="tender-keyword"></select></div>
         <div><div class="label">الإجراء المقترح</div><select id="tender-action"><option>مراجعة الرابط</option><option>اتصال</option><option>واتساب</option><option>تجهيز عرض سعر</option><option>تسجيل في المنصة</option><option>تجاهل</option></select></div>
         <div><div class="label">حالة المتابعة</div><select id="tender-follow"><option value="new">جديدة</option><option value="reviewing">قيد المراجعة</option><option value="contacted">تم التواصل</option><option value="proposal">تم تجهيز عرض</option><option value="ignored">تم التجاهل</option><option value="done">منتهية</option></select></div>
@@ -701,29 +701,44 @@ const inferQuoteFields = (record, wrapper) => {
   };
 };
 const daftraItemsFrom = (record, wrapper) => {
-  const candidates = [
-    wrapper?.EstimateItem, wrapper?.EstimateItems, wrapper?.InvoiceItem, wrapper?.InvoiceItems,
-    record?.EstimateItem, record?.EstimateItems, record?.InvoiceItem, record?.InvoiceItems,
-    record?.items, record?.line_items, record?.details
-  ];
-  const items = candidates.find(Array.isArray) || [];
+  const wanted = new Set(['EstimateItem', 'EstimateItems', 'InvoiceItem', 'InvoiceItems', 'items', 'line_items', 'details', 'Products', 'products']);
+  const arrays = [];
+  const scan = (node, depth = 0) => {
+    if (!node || depth > 3 || typeof node !== 'object') return;
+    Object.entries(node).forEach(([key, value]) => {
+      if (Array.isArray(value) && wanted.has(key)) arrays.push(value);
+      else if (value && typeof value === 'object' && !Array.isArray(value)) scan(value, depth + 1);
+    });
+  };
+  scan(wrapper);
+  scan(record);
+  const items = arrays.find(arr => arr.length) || [];
   return items.map(item => item.EstimateItem || item.InvoiceItem || item).map(item => ({
-    name: item.item || item.name || item.product_name || item.description || item.item_name || 'بند',
-    description: item.description || item.details || '',
-    quantity: item.quantity || item.qty || '',
-    unitPrice: item.unit_price || item.price || item.unitPrice || '',
-    tax: item.tax1 || item.tax || item.tax_value || '',
-    total: item.total || item.subtotal || item.line_total || ''
+    name: item.item || item.name || item.product_name || item.description || item.item_name || item.Product?.name || 'بند',
+    description: item.description || item.details || item.Product?.description || '',
+    quantity: item.quantity || item.qty || item.amount || '',
+    unitPrice: item.unit_price || item.price || item.unitPrice || item.unit_cost || '',
+    tax: item.tax1 || item.tax || item.tax_value || item.tax_amount || item.vat || '',
+    total: item.total || item.subtotal || item.line_total || item.net_total || ''
   }));
 };
 const daftraDetailsFrom = (record, wrapper) => {
   const inferred = inferQuoteFields(record || {}, wrapper || {});
+  const totalFields = {
+    subtotal: firstText(record.subtotal, record.sub_total, record.net_total, record.before_tax, wrapper?.subtotal, wrapper?.sub_total),
+    discount: firstText(record.discount, record.discount_value, record.discount_amount, wrapper?.discount),
+    tax: firstText(record.tax_total, record.total_tax, record.tax, record.tax_value, record.vat, wrapper?.tax_total),
+    total: firstText(record.total, record.grand_total, record.total_amount, record.amount, wrapper?.total),
+    paid: firstText(record.paid, record.paid_amount, record.amount_paid, wrapper?.paid),
+    balance: firstText(record.balance, record.due_amount, record.remaining, wrapper?.balance)
+  };
   return {
     status: record.status || record.state || '',
     clientName: record.client_business_name || record.client_first_name || record.client_name || '',
     clientPhone: inferred.phone,
     notes: firstText(record.notes, record.note, record.description, stripHtml(record.html_notes)),
     terms: record.terms || record.terms_conditions || '',
+    totals: totalFields,
     inferred,
     items: daftraItemsFrom(record, wrapper)
   };
@@ -2462,10 +2477,8 @@ function renderAssetsAndTenders() {
   const tender = document.getElementById('tender-list');
   const tenderPlatforms = document.getElementById('tender-platforms');
   if (tenderPlatforms) tenderPlatforms.innerHTML = `
-    <div class="tender-chip-grid">
-      ${TENDER_PLATFORMS.map(p => `<button class="btn-secondary" onclick="openTenderPlatform('${p.id}')">${p.name}</button>`).join('')}
-    </div>
-    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">اعتماد يعمل بجلب فعلي. تنافس وفرص وفرص الترفيه مصادر رسمية للمتابعة ونربط جلبها عند توفر API أو endpoint مناسب.</div>`;
+    <div style="font-size:13px;font-weight:700;color:#5DCAA5">اعتماد متصل بالجلب الفعلي</div>
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">يضغط بندر أو المشرف زر جلب اعتماد الآن، ويحفظ النظام الفرص المطابقة في البطاقات أدناه من مصدر اعتماد. تنافس وفرص نربطها لاحقاً بعد توفر API أو endpoint ثابت.</div>`;
   const tenderKeywords = document.getElementById('tender-keywords');
   if (tenderKeywords) tenderKeywords.innerHTML = `
     <div class="tender-chip-grid">
@@ -2482,13 +2495,13 @@ function renderAssetsAndTenders() {
         <div class="flex-between mb-12">
           <div>
             <div style="font-size:14px;font-weight:600">رصد اعتماد الفعلي</div>
-            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر فحص: ' + radarDate + (lastCount ? ' — نتائج محفوظة/محدثة: ' + lastCount : '') : 'اضغط تشغيل الرادار لجلب المنافسات من اعتماد'}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر فحص: ' + radarDate + (lastCount ? ' — نتائج محفوظة/محدثة: ' + lastCount : '') : 'اضغط جلب اعتماد الآن لجلب المنافسات من اعتماد'}</div>
           </div>
           <div class="flex gap-6">
             <button class="btn-sync" onclick="runTenderRadar()">جلب اعتماد الآن</button>
           </div>
         </div>
-        <div class="text-secondary" style="font-size:12px;line-height:1.8">هذا الفحص لا يفتح قوقل. النظام يتصل بمصدر اعتماد العام، يفلتر الفرص المناسبة للخيام الأوروبية والفعاليات، ثم يحفظها في البطاقات أدناه.</div>
+        <div class="text-secondary" style="font-size:12px;line-height:1.8">النظام يتصل بمصدر اعتماد العام، يفلتر الفرص المناسبة للخيام الأوروبية والفعاليات، ثم يحفظها في البطاقات أدناه.</div>
         ${lastErrors.length ? `<div class="text-secondary" style="font-size:11px;margin-top:8px;color:#EF9F27">تنبيه: تعذر فحص بعض الكلمات مؤقتاً (${lastErrors.length}).</div>` : ''}
       </div>`;
   }
@@ -2538,20 +2551,19 @@ function renderDaftraDetails(c) {
   }
   const d = c.daftraDetails;
   const items = Array.isArray(d.items) ? d.items : [];
+  const totals = d.totals || {};
+  const notesText = [d.notes, d.terms].filter(Boolean).join('\n\n');
+  const totalRows = [
+    ['المجموع قبل الضريبة', totals.subtotal],
+    ['الخصم', totals.discount],
+    ['ضريبة القيمة المضافة', totals.tax],
+    ['الإجمالي', totals.total || (c.offerPrice ? c.offerPrice.toLocaleString() + ' ر.س' : '')],
+    ['المدفوع', totals.paid || (c.deposit ? c.deposit.toLocaleString() + ' ر.س' : '')],
+    ['المتبقي', totals.balance || (c.remaining ? c.remaining.toLocaleString() + ' ر.س' : '')],
+  ].filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '0');
   return `
     <div style="border-top:0.5px solid #d8e0e7;margin-top:12px;padding-top:12px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:8px">تفاصيل دفترة</div>
-      <div style="display:grid;gap:6px;margin-bottom:10px">
-        ${d.status ? `<div class="row"><span class="text-secondary">حالة دفترة</span><span>${htmlEscape(d.status)}</span></div>` : ''}
-        ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل</span><span>${htmlEscape(c.updatedAt)}</span></div>` : ''}
-        ${d.inferred?.phone ? `<div class="row"><span class="text-secondary">جوال مستخرج</span><span dir="ltr">${htmlEscape(d.inferred.phone)}</span></div>` : ''}
-        ${d.inferred?.location ? `<div class="row"><span class="text-secondary">موقع مستخرج</span><span>${htmlEscape(d.inferred.location)}</span></div>` : ''}
-        ${d.inferred?.duration ? `<div class="row"><span class="text-secondary">مدة مستخرجة</span><span>${htmlEscape(d.inferred.duration)}</span></div>` : ''}
-        ${d.inferred?.installDate ? `<div class="row"><span class="text-secondary">تاريخ تركيب مستخرج</span><span>${htmlEscape(d.inferred.installDate)}</span></div>` : ''}
-        ${d.inferred?.endDate ? `<div class="row"><span class="text-secondary">نهاية مستخرجة</span><span>${htmlEscape(d.inferred.endDate)}</span></div>` : ''}
-        ${d.notes ? `<div class="row"><span class="text-secondary">ملاحظات</span><span>${htmlEscape(d.notes)}</span></div>` : ''}
-        ${d.terms ? `<div class="row"><span class="text-secondary">الشروط</span><span>${htmlEscape(d.terms)}</span></div>` : ''}
-      </div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">بنود عرض السعر</div>
       ${items.length ? `<div style="overflow:auto;border:0.5px solid #d8e0e7;border-radius:8px">
         <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px">
           <thead>
@@ -2559,7 +2571,8 @@ function renderDaftraDetails(c) {
               <th style="text-align:right;padding:8px">البند</th>
               <th style="text-align:right;padding:8px">الوصف</th>
               <th style="text-align:center;padding:8px">الكمية</th>
-              <th style="text-align:left;padding:8px">السعر</th>
+              <th style="text-align:left;padding:8px">سعر الوحدة</th>
+              <th style="text-align:left;padding:8px">الضريبة</th>
               <th style="text-align:left;padding:8px">الإجمالي</th>
             </tr>
           </thead>
@@ -2569,43 +2582,42 @@ function renderDaftraDetails(c) {
               <td style="padding:8px;color:#667085">${htmlEscape(item.description || '—')}</td>
               <td style="padding:8px;text-align:center">${htmlEscape(item.quantity || '—')}</td>
               <td style="padding:8px;text-align:left">${htmlEscape(item.unitPrice || '—')}</td>
+              <td style="padding:8px;text-align:left">${htmlEscape(item.tax || '—')}</td>
               <td style="padding:8px;text-align:left;font-weight:700">${htmlEscape(item.total || '—')}</td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>` : `<div class="text-secondary" style="font-size:12px">${loadingDaftraDetails.has(c.id) ? 'جاري جلب بنود العرض من دفترة...' : 'لم ترجع دفترة بنود العرض لهذا السجل، وقد تكون تفاصيل البنود في مسار مختلف داخل دفترة.'}</div>`}
+      <div style="background:#f7f9fb;border:0.5px solid #d8e0e7;border-radius:8px;padding:10px 12px;margin-top:10px">
+        ${totalRows.map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:4px 0;border-bottom:0.5px solid #e6ebef"><span class="text-secondary">${k}</span><span style="font-weight:700">${htmlEscape(String(v))}</span></div>`).join('')}
+      </div>
+      <div style="margin-top:12px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">الملاحظات</div>
+        <div style="white-space:pre-wrap;background:#f7f9fb;border:0.5px solid #d8e0e7;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.8">${notesText ? htmlEscape(notesText) : 'لا توجد ملاحظات في دفترة'}</div>
+      </div>
     </div>`;
 }
 
 function showModal(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
-  const days = daysUntil(c.installDate);
   const nextStage = WORKFLOW_STAGES[WORKFLOW_STAGES.indexOf(c.stage)+1];
   const taxInvoice = isTaxInvoice(c);
   const confirmed = isConfirmedSale(c);
   document.getElementById('modal-content').innerHTML = `
     <div class="flex-between mb-12">
       <div>
-        <div style="font-size:15px;font-weight:500">${c.name}</div>
-        ${c.daftraNo ? '<div style="font-size:11px;color:#5DCAA5">دفترة #'+c.daftraNo+'</div>' : ''}
+        <div style="font-size:16px;font-weight:700">${c.name}</div>
+        <div style="font-size:12px;color:#667085;margin-top:3px">${c.phone ? '<span dir="ltr">'+c.phone+'</span>' : 'رقم الجوال غير موجود في دفترة'}</div>
+        ${c.daftraNo ? '<div style="font-size:11px;color:#5DCAA5;margin-top:3px">دفترة #'+c.daftraNo+'</div>' : ''}
       </div>
       <span class="badge" style="background:${COLORS[c.stage]};color:${CTXT[c.stage]}">${LABELS[c.stage]}</span>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-      <div style="background:${confirmed?'#061a12':'#1a1100'};border:0.5px solid ${confirmed?'#5DCAA550':'#FAC77550'};border-radius:8px;padding:8px 10px">
-        <div class="label">حالة عرض السعر</div>
-        <div style="font-size:13px;color:${confirmed?'#5DCAA5':'#FAC775'};font-weight:600">${confirmed?'مؤكد - دخل تأجير':'غير مؤكد'}</div>
-      </div>
-      <div style="background:${taxInvoice?'#061a12':'#13161f'};border:0.5px solid ${taxInvoice?'#5DCAA550':'#2e3244'};border-radius:8px;padding:8px 10px">
-        <div class="label">الفاتورة الضريبية</div>
-        <div style="font-size:13px;color:${taxInvoice?'#5DCAA5':'#9a9898'};font-weight:600">${taxInvoice?'صادرة':'غير محسوبة ضريبياً'}</div>
-      </div>
-    </div>
-    ${[['الجوال',c.phone ? `<span dir="ltr">${c.phone}</span>` : 'غير موجود في دفترة'],['المنتجات',c.products],['الموقع',c.location],['مدة الإيجار',c.rentalDuration],['تاريخ التركيب',c.installDate||'لم يحدد'],['نهاية التركيب/الفك',c.installEndDate],['المسؤول',c.assignedTo],['المصدر',c.source==='daftra'?'مزامن من دفترة':'يدوي']].map(([k,v])=>`<div class="row"><span class="text-secondary">${k}</span><span>${v||'—'}</span></div>`).join('')}
-    ${c.updatedAt ? `<div class="row"><span class="text-secondary">آخر تعديل في دفترة</span><span>${c.updatedAt}</span></div>` : ''}
-    <div style="background:#13161f;border-radius:8px;padding:10px 12px;margin:12px 0">
-      ${[['الإجمالي',c.offerPrice.toLocaleString()+' ر.س'],['دفعة أولى',c.deposit.toLocaleString()+' ر.س'],['دفعة ثانية',c.remaining.toLocaleString()+' ر.س']].map(([k,v])=>`<div class="flex-between" style="font-size:12px;padding:3px 0"><span class="text-secondary">${k}</span><span class="text-success" style="font-weight:500">${v}</span></div>`).join('')}
+    <div class="flex gap-6" style="flex-wrap:wrap;margin-bottom:10px">
+      ${statusPill(confirmed ? 'عرض مؤكد' : 'غير مؤكد', confirmed ? '#5DCAA5' : '#FAC775')}
+      ${statusPill(taxInvoice ? 'فاتورة ضريبية' : 'ليس فاتورة ضريبية', taxInvoice ? '#5DCAA5' : '#9a9898')}
+      ${c.source === 'daftra' ? statusPill('دفترة', '#85B7EB') : statusPill('يدوي', '#9a9898')}
+      ${c.updatedAt ? statusPill('آخر تعديل ' + c.updatedAt, '#9a9898') : ''}
     </div>
     ${c.source === 'daftra' ? renderDaftraDetails(c) : ''}
     <div class="flex gap-8" style="flex-wrap:wrap">
