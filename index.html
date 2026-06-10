@@ -541,7 +541,17 @@
 
 <div id="tab-reports" class="tab-page">
   <div class="section">
-    <div style="font-size:15px;font-weight:600;margin-bottom:10px">التقارير</div>
+    <div class="flex-between mb-12" style="gap:10px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:15px;font-weight:600">التقارير</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:2px">تقارير بالفترة لكل أجزاء البرنامج</div>
+      </div>
+      <div class="flex gap-6" style="flex-wrap:wrap">
+        <input id="report-from" type="date" onchange="renderReports()">
+        <input id="report-to" type="date" onchange="renderReports()">
+        <button class="btn-secondary" onclick="setReportThisMonth()">هذا الشهر</button>
+      </div>
+    </div>
     <div id="reports-view"></div>
   </div>
 </div>
@@ -2592,6 +2602,91 @@ function inMonth(date, key = currentMonthKey()) {
   return dateOnly(date).slice(0, 7) === key;
 }
 
+function reportRange() {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = today.slice(0, 8) + '01';
+  const fromEl = document.getElementById('report-from');
+  const toEl = document.getElementById('report-to');
+  if (fromEl && !fromEl.value) fromEl.value = monthStart;
+  if (toEl && !toEl.value) toEl.value = today;
+  return {
+    from: fromEl?.value || monthStart,
+    to: toEl?.value || today
+  };
+}
+
+function dateInRange(value, from, to) {
+  const d = dateOnly(value);
+  if (!d) return false;
+  return (!from || d >= from) && (!to || d <= to);
+}
+
+function setReportThisMonth() {
+  const today = new Date().toISOString().slice(0, 10);
+  const from = document.getElementById('report-from');
+  const to = document.getElementById('report-to');
+  if (from) from.value = today.slice(0, 8) + '01';
+  if (to) to.value = today;
+  renderReports();
+}
+
+function renderReports() {
+  const el = document.getElementById('reports-view');
+  if (!el) return;
+  const { from, to } = reportRange();
+  const approved = approvedFinanceEntries().filter(e => dateInRange(e.created, from, to));
+  const drafts = draftFinanceEntries().filter(e => dateInRange(e.created, from, to));
+  const totals = financeTotals(approved);
+  const periodQuotes = clients.filter(c => !isTaxInvoice(c) && dateInRange(c.created || c.updatedAt, from, to));
+  const confirmedQuotes = periodQuotes.filter(isConfirmedSale);
+  const periodInvoices = clients.filter(c => isTaxInvoice(c) && dateInRange(c.created || c.updatedAt, from, to));
+  const periodInstalls = clients.filter(c => isConfirmedSale(c) && dateInRange(clientOpsDate(c) || c.created, from, to));
+  const periodGeneral = generalAlerts.filter(x => dateInRange(x.due, from, to));
+  const periodStaff = staffDocs.filter(x => dateInRange(x.expires, from, to));
+  const periodVehicles = vehicles.filter(x => dateInRange(x.due, from, to));
+  const custodyIssued = approved.filter(e => e.type === 'عهدة');
+  const custodyClosed = custodyIssued.filter(e => custodyRemaining(e) <= 0);
+  const custodyRemainingTotal = custodyIssued.reduce((sum, e) => sum + custodyRemaining(e), 0);
+  const rows = [
+    ['الحركات المالية المعتمدة', approved.length],
+    ['حركات بانتظار الاعتماد', drafts.length],
+    ['عروض أسعار بالفترة', periodQuotes.length],
+    ['عروض مؤكدة بالفترة', confirmedQuotes.length],
+    ['فواتير ضريبية بالفترة', periodInvoices.length],
+    ['تركيبات بالفترة', periodInstalls.length],
+    ['تنبيهات عامة بالفترة', periodGeneral.length],
+    ['مستندات موظفين بالفترة', periodStaff.length],
+    ['تنبيهات سيارات بالفترة', periodVehicles.length],
+  ];
+  el.innerHTML = `
+    <div class="grid-4">
+      <div class="stat-card"><div class="label">الإيرادات المعتمدة</div><div style="font-size:20px;color:#5DCAA5;font-weight:800">${money(totals.income)}</div></div>
+      <div class="stat-card"><div class="label">المصروفات والعهد</div><div style="font-size:20px;color:#FAC775;font-weight:800">${money(totals.out)}</div></div>
+      <div class="stat-card"><div class="label">العهد المتبقية</div><div style="font-size:20px;color:${custodyRemainingTotal > 0 ? '#E24B4A' : '#5DCAA5'};font-weight:800">${money(custodyRemainingTotal)}</div></div>
+      <div class="stat-card"><div class="label">دخل عروض مؤكدة</div><div style="font-size:20px;color:#85B7EB;font-weight:800">${money(confirmedQuotes.reduce((s,c)=>s+clientTotalAmount(c),0))}</div></div>
+    </div>
+    <div class="section" style="margin-top:12px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">ملخص الفترة ${from} إلى ${to}</div>
+      ${rows.map(([label, value]) => `<div class="list-row" style="padding:8px 0"><div style="font-size:13px">${label}</div>${statusPill(String(value), '#85B7EB')}</div>`).join('')}
+    </div>
+    <div class="grid-2" style="margin-top:12px">
+      <div class="section">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px">أقرب التركيبات داخل الفترة</div>
+        ${periodInstalls.slice(0, 8).map(c => `<div class="list-row" style="padding:8px 0">
+          <div><div style="font-weight:700">${htmlEscape(c.name || 'عميل')}</div><div class="text-secondary" style="margin-top:3px">${clientOpsDate(c) || 'بدون موعد'} — المتبقي: ${money(clientRemainingAmount(c))}</div></div>
+          <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
+        </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد تركيبات في الفترة</div>'}
+      </div>
+      <div class="section">
+        <div style="font-size:14px;font-weight:700;margin-bottom:8px">العهد في الفترة</div>
+        ${custodyIssued.slice(0, 8).map(e => `<div class="list-row" style="padding:8px 0">
+          <div><div style="font-weight:700">${htmlEscape(e.person || 'بدون مستلم')} — ${money(e.amount)}</div><div class="text-secondary" style="margin-top:3px">المتبقي: ${money(custodyRemaining(e))}</div></div>
+          ${statusPill(custodyRemaining(e) <= 0 ? 'مغلقة' : 'مفتوحة', custodyRemaining(e) <= 0 ? '#5DCAA5' : '#E24B4A')}
+        </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد عهد في الفترة</div>'}
+      </div>
+    </div>`;
+}
+
 function custodySpendLines(entryId) {
   return Array.isArray(custodySpends?.[entryId]) ? custodySpends[entryId] : [];
 }
@@ -3139,16 +3234,6 @@ function renderFinance() {
       </div>
     </div>`).join('') : '<div class="text-secondary" style="font-size:12px;padding:8px 0">لا توجد حركات مالية بعد</div>'}`;
   renderSmartAccounting();
-  const reports = document.getElementById('reports-view');
-  if (reports) reports.innerHTML = `
-    <div class="grid-2">
-      <div class="stat-card"><div class="label">إيرادات آخر 7 أيام</div><div style="font-size:20px;color:#5DCAA5;font-weight:700">${money(week.income)}</div></div>
-      <div class="stat-card"><div class="label">مصروفات آخر 7 أيام</div><div style="font-size:20px;color:#FAC775;font-weight:700">${money(week.out)}</div></div>
-      <div class="stat-card"><div class="label">حركات بانتظار الاعتماد</div><div style="font-size:20px;color:#E24B4A;font-weight:700">${drafts.length}</div></div>
-      <div class="stat-card"><div class="label">ديون/التزامات مسجلة</div><div style="font-size:20px;color:#FAC775;font-weight:700">${money(allSum.debt)}</div></div>
-      <div class="stat-card"><div class="label">دخل التأجير المؤكد</div><div style="font-size:20px;color:#5DCAA5;font-weight:700">${money(clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0))}</div></div>
-      <div class="stat-card"><div class="label">فواتير ضريبية</div><div style="font-size:20px;color:#85B7EB;font-weight:700">${money(clients.filter(isTaxInvoice).reduce((s,c)=>s+c.offerPrice,0))}</div></div>
-    </div>`;
 }
 
 function renderOperations() {
@@ -3660,6 +3745,7 @@ function render() {
   safe('المحاسبة', renderFinance, 'finance-list');
   safe('التركيبات', renderOperations, 'install-list');
   safe('الموظفين والمنافسات', renderAssetsAndTenders, 'tender-list');
+  safe('التقارير', renderReports, 'reports-view');
 }
 
 function showMsg(t) {
