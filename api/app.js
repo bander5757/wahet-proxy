@@ -1042,6 +1042,63 @@ async function updateFinanceStatus(client, payload, user) {
   return rows.find((row) => row.id === id) || financeRow(result.rows[0]);
 }
 
+async function updateFinanceEntry(client, payload, user) {
+  if (!user || !["owner", "accountant", "viewer"].includes(user.role)) {
+    const err = new Error("ليس لديك صلاحية تعديل الحركات المالية");
+    err.statusCode = 403;
+    throw err;
+  }
+  const id = String(payload.id || "").trim();
+  const amount = moneyNumber(payload.amount);
+  if (!id || amount <= 0) {
+    const err = new Error("المبلغ أو رقم الحركة غير صحيح");
+    err.statusCode = 400;
+    throw err;
+  }
+  const accountId = await requireDefaultAccount(client, payload.account || "الحساب الرسمي");
+  const result = await client.query(
+    `update finance_entries
+     set amount = $1,
+         account_id = $2,
+         statement = case when $3::text <> '' then $3::text else statement end
+     where id = $4
+     returning *`,
+    [amount, accountId, String(payload.note || payload.statement || "").trim(), id]
+  );
+  if (!result.rows[0]) {
+    const err = new Error("الحركة غير موجودة");
+    err.statusCode = 404;
+    throw err;
+  }
+  const rows = await listFinance(client);
+  return rows.find((row) => row.id === id) || financeRow(result.rows[0]);
+}
+
+async function renameBankAccount(client, payload, user) {
+  if (!user || !["owner", "accountant", "viewer"].includes(user.role)) {
+    const err = new Error("ليس لديك صلاحية تعديل الحسابات البنكية");
+    err.statusCode = 403;
+    throw err;
+  }
+  const oldName = String(payload.oldName || "").trim();
+  const newName = String(payload.newName || "").trim();
+  if (!oldName || !newName) {
+    const err = new Error("اسم الحساب القديم والجديد مطلوبان");
+    err.statusCode = 400;
+    throw err;
+  }
+  const existing = await client.query(
+    "select id from bank_accounts where name = $1 and is_active = true limit 1",
+    [oldName]
+  );
+  if (existing.rows[0]) {
+    await client.query("update bank_accounts set name = $1 where id = $2", [newName, existing.rows[0].id]);
+  } else {
+    await requireDefaultAccount(client, newName);
+  }
+  return { oldName, newName };
+}
+
 async function dashboard(client, user) {
   const finance = await listFinance(client);
   const quoteStates = await listQuoteStates(client);
@@ -1227,6 +1284,16 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/finance/status") {
       const entry = await updateFinanceStatus(client, req.body || {}, user);
       return res.status(200).json({ ok: true, data: entry });
+    }
+
+    if (req.method === "POST" && path === "/finance/update") {
+      const entry = await updateFinanceEntry(client, req.body || {}, user);
+      return res.status(200).json({ ok: true, data: entry });
+    }
+
+    if (req.method === "POST" && path === "/finance/rename-account") {
+      const renamed = await renameBankAccount(client, req.body || {}, user);
+      return res.status(200).json({ ok: true, data: renamed });
     }
 
     return res.status(404).json({ ok: false, error: "المسار غير موجود" });
