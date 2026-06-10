@@ -174,6 +174,7 @@ function staffDocRow(row) {
     type: DOC_TYPE_LABELS[row.document_type] || row.document_type,
     expires: row.expires_on,
     note: row.notes || "",
+    attachment: row.attachment_name || "",
   };
 }
 
@@ -185,6 +186,7 @@ function vehicleTaskRow(row) {
     type: VEHICLE_TASK_LABELS[row.task_type] || row.task_type,
     due: row.due_on,
     odometer: row.due_odometer ? String(row.due_odometer) : row.notes || "",
+    attachment: row.attachment_name || "",
   };
 }
 
@@ -195,6 +197,7 @@ function generalAlertRow(row) {
     due: row.due_on,
     note: row.notes || "",
     status: row.status || "open",
+    attachment: row.attachment_name || "",
   };
 }
 
@@ -384,10 +387,27 @@ async function saveQuoteState(client, payload, user) {
   return quoteStateRow(result.rows[0]);
 }
 
+async function saveAttachment(client, ownerType, ownerId, attachment, mimeType) {
+  const fileName = String(attachment || "").trim().slice(0, 240);
+  if (!fileName) return;
+  await client.query(
+    `insert into attachments (owner_type, owner_id, file_name, file_path, mime_type)
+     values ($1, $2, $3, $4, $5)`,
+    [ownerType, ownerId, fileName, "pending-local-upload/" + fileName, mimeType || null]
+  );
+}
+
 async function listStaffDocs(client) {
   const result = await client.query(`
-    select id, employee_name, document_type, expires_on::text, notes
-    from staff_documents
+    select sd.id, sd.employee_name, sd.document_type, sd.expires_on::text, sd.notes, a.file_name as attachment_name
+    from staff_documents sd
+    left join lateral (
+      select file_name
+      from attachments
+      where owner_type = 'staff_doc' and owner_id = sd.id
+      order by created_at desc
+      limit 1
+    ) a on true
     order by expires_on asc, created_at desc
   `);
   return result.rows.map(staffDocRow);
@@ -408,7 +428,8 @@ async function createStaffDoc(client, payload) {
      returning id, employee_name, document_type, expires_on::text, notes`,
     [name, type, expires, payload.note || payload.notes || null]
   );
-  return staffDocRow(result.rows[0]);
+  await saveAttachment(client, "staff_doc", result.rows[0].id, payload.attachment, payload.mime_type);
+  return { ...staffDocRow(result.rows[0]), attachment: String(payload.attachment || "") };
 }
 
 async function deleteStaffDoc(client, id) {
@@ -425,9 +446,17 @@ async function listVehicleTasks(client) {
       vt.task_type,
       vt.due_on::text,
       vt.due_odometer,
-      vt.notes
+      vt.notes,
+      a.file_name as attachment_name
     from vehicle_tasks vt
     join vehicles v on v.id = vt.vehicle_id
+    left join lateral (
+      select file_name
+      from attachments
+      where owner_type = 'vehicle' and owner_id = vt.id
+      order by created_at desc
+      limit 1
+    ) a on true
     where vt.status = 'open'
     order by vt.due_on asc nulls last, vt.created_at desc
   `);
@@ -459,7 +488,8 @@ async function createVehicleTask(client, payload) {
      returning id, vehicle_id, task_type, due_on::text, due_odometer, notes`,
     [vehicleId, type, due, hasNumericOdometer ? odometerValue : null, hasNumericOdometer ? null : payload.odometer || null]
   );
-  return vehicleTaskRow({ ...result.rows[0], vehicle_name: name });
+  await saveAttachment(client, "vehicle", result.rows[0].id, payload.attachment, payload.mime_type);
+  return { ...vehicleTaskRow({ ...result.rows[0], vehicle_name: name }), attachment: String(payload.attachment || "") };
 }
 
 async function deleteVehicleTask(client, id) {
@@ -473,10 +503,17 @@ async function deleteVehicleTask(client, id) {
 async function listGeneralAlerts(client) {
   try {
     const result = await client.query(`
-      select id, title, due_on::text, notes, status
-      from general_alerts
-      where status = 'open'
-      order by due_on asc, created_at desc
+      select ga.id, ga.title, ga.due_on::text, ga.notes, ga.status, a.file_name as attachment_name
+      from general_alerts ga
+      left join lateral (
+        select file_name
+        from attachments
+        where owner_type = 'general_alert' and owner_id = ga.id
+        order by created_at desc
+        limit 1
+      ) a on true
+      where ga.status = 'open'
+      order by ga.due_on asc, ga.created_at desc
     `);
     return result.rows.map(generalAlertRow);
   } catch (err) {
@@ -499,7 +536,8 @@ async function createGeneralAlert(client, payload) {
      returning id, title, due_on::text, notes, status`,
     [title, due, payload.note || payload.notes || null]
   );
-  return generalAlertRow(result.rows[0]);
+  await saveAttachment(client, "general_alert", result.rows[0].id, payload.attachment, payload.mime_type);
+  return { ...generalAlertRow(result.rows[0]), attachment: String(payload.attachment || "") };
 }
 
 async function deleteGeneralAlert(client, id) {

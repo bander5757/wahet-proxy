@@ -435,6 +435,7 @@
           <div><div class="label">اسم التنبيه</div><input id="general-alert-title" type="text" placeholder="مثال: تجديد اشتراك منصة"></div>
           <div><div class="label">تاريخ التنبيه</div><input id="general-alert-date" type="date"></div>
           <div style="grid-column:1/-1"><div class="label">ملاحظات</div><textarea id="general-alert-note" rows="3" placeholder="اختياري"></textarea></div>
+          <div style="grid-column:1/-1"><div class="label">إضافة صورة أو ملف أو تصوير بالكاميرا</div><input id="general-alert-file" type="file" accept="image/*,.pdf" capture="environment"></div>
         </div>
         <div class="flex gap-8 mt-8">
           <button class="btn-primary" onclick="saveGeneralAlert()">حفظ</button>
@@ -457,6 +458,7 @@
           <div><div class="label">نوع المستند</div><select id="staff-type"><option>إقامة</option><option>رخصة عمل</option><option>جواز</option><option>تأمين</option><option>عقد</option><option>أخرى</option></select></div>
           <div><div class="label">تاريخ الانتهاء</div><input id="staff-expires" type="date"></div>
           <div><div class="label">ملاحظة</div><input id="staff-note" type="text" placeholder="اختياري"></div>
+          <div style="grid-column:1/-1"><div class="label">إضافة صورة أو ملف أو تصوير بالكاميرا</div><input id="staff-file" type="file" accept="image/*,.pdf" capture="environment"></div>
         </div>
         <div class="flex gap-8 mt-8">
           <button class="btn-primary" onclick="saveStaffDoc()">حفظ</button>
@@ -479,6 +481,7 @@
           <div><div class="label">نوع التنبيه</div><select id="vehicle-type"><option>تغيير زيت</option><option>فحص</option><option>تأمين</option><option>استمارة</option><option>صيانة</option><option>أخرى</option></select></div>
           <div><div class="label">تاريخ الاستحقاق</div><input id="vehicle-due" type="date"></div>
           <div><div class="label">عداد/ملاحظة</div><input id="vehicle-odometer" type="text" placeholder="كل 5,000 كم"></div>
+          <div style="grid-column:1/-1"><div class="label">إضافة صورة أو ملف أو تصوير بالكاميرا</div><input id="vehicle-file" type="file" accept="image/*,.pdf" capture="environment"></div>
         </div>
         <div class="flex gap-8 mt-8">
           <button class="btn-primary" onclick="saveVehicleTask()">حفظ</button>
@@ -2278,9 +2281,10 @@ async function saveStaffDoc() {
   const type = document.getElementById('staff-type').value;
   const expires = document.getElementById('staff-expires').value;
   const note = document.getElementById('staff-note').value.trim();
+  const file = document.getElementById('staff-file')?.files?.[0];
   if (!name) { alert('أدخل الاسم'); return; }
   if (!expires) { alert('أدخل تاريخ الانتهاء'); return; }
-  const item = { id: 'staff_' + Date.now(), name, type, expires, note };
+  const item = { id: 'staff_' + Date.now(), name, type, expires, note, attachment: file ? file.name : '' };
   if (apiOnline) {
     try {
       const res = await apiRequest('/staff-docs', { method: 'POST', body: JSON.stringify(item) });
@@ -2293,7 +2297,7 @@ async function saveStaffDoc() {
     staffDocs.unshift(item);
   }
   saveStaffDocs();
-  ['staff-name','staff-expires','staff-note'].forEach(id => document.getElementById(id).value = '');
+  ['staff-name','staff-expires','staff-note','staff-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('staff-type').value = 'إقامة';
   toggleStaffForm();
   showMsg('✅ تم حفظ تنبيه الموظف');
@@ -2332,9 +2336,10 @@ async function saveGeneralAlert() {
   const title = document.getElementById('general-alert-title').value.trim();
   const due = document.getElementById('general-alert-date').value;
   const note = document.getElementById('general-alert-note').value.trim();
+  const file = document.getElementById('general-alert-file')?.files?.[0];
   if (!title) { alert('أدخل اسم التنبيه'); return; }
   if (!due) { alert('أدخل تاريخ التنبيه'); return; }
-  const item = { id: 'general_' + Date.now(), title, due, note };
+  const item = { id: 'general_' + Date.now(), title, due, note, attachment: file ? file.name : '' };
   if (apiOnline) {
     try {
       const res = await apiRequest('/general-alerts', { method: 'POST', body: JSON.stringify(item) });
@@ -2347,7 +2352,7 @@ async function saveGeneralAlert() {
     generalAlerts.unshift(item);
   }
   saveGeneralAlerts();
-  ['general-alert-title','general-alert-date','general-alert-note'].forEach(id => document.getElementById(id).value = '');
+  ['general-alert-title','general-alert-date','general-alert-note','general-alert-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   toggleGeneralAlertForm();
   showMsg('✅ تم حفظ التنبيه العام');
   render();
@@ -2376,9 +2381,10 @@ async function saveVehicleTask() {
   const type = document.getElementById('vehicle-type').value;
   const due = document.getElementById('vehicle-due').value;
   const odometer = document.getElementById('vehicle-odometer').value.trim();
+  const file = document.getElementById('vehicle-file')?.files?.[0];
   if (!name) { alert('أدخل اسم السيارة'); return; }
   if (!due) { alert('أدخل تاريخ الاستحقاق'); return; }
-  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer };
+  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer, attachment: file ? file.name : '' };
   if (apiOnline) {
     try {
       const res = await apiRequest('/vehicle-tasks', { method: 'POST', body: JSON.stringify(item) });
@@ -2391,7 +2397,7 @@ async function saveVehicleTask() {
     vehicles.unshift(item);
   }
   saveVehicles();
-  ['vehicle-name','vehicle-due','vehicle-odometer'].forEach(id => document.getElementById(id).value = '');
+  ['vehicle-name','vehicle-due','vehicle-odometer','vehicle-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('vehicle-type').value = 'تغيير زيت';
   toggleVehicleForm();
   showMsg('✅ تم حفظ تنبيه السيارة');
@@ -3194,6 +3200,7 @@ function renderAssetsAndTenders() {
         <div>
           <div style="font-weight:600">${x.title}</div>
           <div class="text-secondary" style="margin-top:3px">${x.due}${x.note ? ' — ' + x.note : ''}</div>
+          ${x.attachment ? `<div class="text-secondary" style="margin-top:3px">مرفق: ${htmlEscape(x.attachment)}</div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           ${statusPill(d === null ? 'بدون مدة' : d < 0 ? 'متأخر' : 'بعد ' + d + ' يوم', color)}
@@ -3212,6 +3219,7 @@ function renderAssetsAndTenders() {
         <div>
           <div style="font-weight:600">${x.name}</div>
           <div class="text-secondary" style="margin-top:3px">${x.type} — ${x.expires}${x.note ? ' — ' + x.note : ''}</div>
+          ${x.attachment ? `<div class="text-secondary" style="margin-top:3px">مرفق: ${htmlEscape(x.attachment)}</div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           ${statusPill(d === null ? 'بدون مدة' : 'بعد ' + d + ' يوم', color)}
@@ -3230,6 +3238,7 @@ function renderAssetsAndTenders() {
         <div>
           <div style="font-weight:600">${x.name}</div>
           <div class="text-secondary" style="margin-top:3px">${x.type} — ${x.due}${x.odometer ? ' — ' + x.odometer : ''}</div>
+          ${x.attachment ? `<div class="text-secondary" style="margin-top:3px">مرفق: ${htmlEscape(x.attachment)}</div>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
           ${statusPill(d === null ? 'بدون مدة' : 'بعد ' + d + ' يوم', color)}

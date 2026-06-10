@@ -110,7 +110,7 @@ create table if not exists finance_entries (
 
 create table if not exists attachments (
   id uuid primary key default gen_random_uuid(),
-  owner_type text not null check (owner_type in ('finance_entry', 'customer', 'quote', 'staff_doc', 'vehicle')),
+  owner_type text not null check (owner_type in ('finance_entry', 'customer', 'quote', 'staff_doc', 'vehicle', 'general_alert')),
   owner_id uuid not null,
   file_name text not null,
   file_path text not null,
