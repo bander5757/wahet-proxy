@@ -15,6 +15,7 @@ const TYPE_LABELS = Object.fromEntries(Object.entries(TYPE_MAP).map(([label, key
 const DOC_TYPE_MAP = {
   "إقامة": "iqama",
   "رخصة عمل": "work_permit",
+  "جواز": "passport",
   "تأمين": "insurance",
   "عقد": "contract",
   "أخرى": "other",
@@ -138,6 +139,14 @@ function daftraDetailsFrom(record, wrapper) {
     clientPhone: record.client_phone || "",
     notes: record.notes || record.note || record.description || "",
     terms: record.terms || record.terms_conditions || "",
+    totals: {
+      subtotal: record.subtotal || record.sub_total || record.net_total || record.before_tax || wrapper?.subtotal || wrapper?.sub_total || "",
+      discount: record.discount || record.discount_value || record.discount_amount || wrapper?.discount || "",
+      tax: record.tax_total || record.total_tax || record.tax || record.tax_value || record.vat || wrapper?.tax_total || "",
+      total: record.total || record.grand_total || record.total_amount || record.amount || wrapper?.total || "",
+      paid: record.paid || record.paid_amount || record.amount_paid || wrapper?.paid || "",
+      balance: record.balance || record.due_amount || record.remaining || wrapper?.balance || "",
+    },
     items: daftraItemsFrom(record, wrapper),
   };
 }
@@ -841,8 +850,8 @@ async function syncDaftraClientsCache(client) {
       products: "—",
       location: est.client_state || "",
       offerPrice: total,
-      deposit: Math.round(total / 2),
-      remaining: Math.round(total / 2),
+      deposit: 0,
+      remaining: total,
       quoteConfirmed: false,
       taxInvoiceIssued: false,
       stage: "عرض_سعر",
@@ -870,6 +879,9 @@ async function syncDaftraClientsCache(client) {
         (card.daftraInvId && String(card.daftraInvId) === String(inv.id))
     );
     const total = moneyNumber(inv.summary_total || inv.total);
+    const details = daftraDetailsFrom(inv, item);
+    const paid = moneyNumber(details.totals?.paid);
+    const balance = moneyNumber(details.totals?.balance);
     const created = firstDate(inv.date, inv.created_at, inv.created);
     const updatedAt = firstDate(inv.updated_at, inv.modified, inv.modified_at, inv.last_modified, inv.last_update, inv.date);
     const card = {
@@ -882,8 +894,8 @@ async function syncDaftraClientsCache(client) {
       products: existing?.products || "—",
       location: inv.client_state || existing?.location || "",
       offerPrice: total,
-      deposit: Math.round(total / 2),
-      remaining: Math.round(total / 2),
+      deposit: paid,
+      remaining: balance || Math.max(0, total - paid),
       quoteConfirmed: true,
       taxInvoiceIssued: true,
       stage: existing?.stage === "تم_التركيب" || existing?.stage === "مكتمل" ? existing.stage : "فاتورة_صادرة",
@@ -895,7 +907,7 @@ async function syncDaftraClientsCache(client) {
       followupDate: updatedAt || created,
       source: "daftra",
       daftraNo: inv.no,
-      daftraDetails: daftraDetailsFrom(inv, item),
+      daftraDetails: details,
     };
     Object.assign(card, quoteStates[card.id] || {});
     card.quoteConfirmed = true;
@@ -960,15 +972,21 @@ async function createFinance(client, payload, user) {
       relatedUserId = user.rows[0]?.id || null;
     }
 
+    const requestedStatus = String(payload.status || "").trim();
+    const canAutoApprove = payload.autoApprove === true && user && ["owner", "accountant", "viewer"].includes(user.role);
+    const initialStatus = canAutoApprove && requestedStatus === "approved" ? "approved" : "draft";
     const inserted = await client.query(
       `insert into finance_entries
         (entry_type, amount, account_id, related_user_id, category, statement, status, entry_date)
-       values ($1, $2, $3, $4, $5, $6, 'draft', current_date)
+       values ($1, $2, $3, $4, $5, $6, $7, current_date)
        returning *`,
-      [entryType, amount, accountId, relatedUserId, payload.category || null, String(payload.note || payload.statement).trim()]
+      [entryType, amount, accountId, relatedUserId, payload.category || null, String(payload.note || payload.statement).trim(), initialStatus]
     );
     if (user?.id) {
       await client.query("update finance_entries set entered_by = $1 where id = $2", [user.id, inserted.rows[0].id]);
+    }
+    if (initialStatus === "approved" && user?.id) {
+      await client.query("update finance_entries set approved_by = $1, approved_at = now() where id = $2", [user.id, inserted.rows[0].id]);
     }
 
     if (payload.attachment) {

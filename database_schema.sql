@@ -123,7 +123,7 @@ create table if not exists staff_documents (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references app_users(id),
   employee_name text not null,
-  document_type text not null check (document_type in ('iqama', 'work_permit', 'insurance', 'contract', 'other')),
+  document_type text not null check (document_type in ('iqama', 'work_permit', 'passport', 'insurance', 'contract', 'other')),
   expires_on date not null,
   alert_days integer[] not null default array[60,30,15,7],
   notes text,

@@ -40,6 +40,7 @@
   .text-info { color: #85B7EB; }
   .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
   .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .flex { display: flex; }
   .flex-between { display: flex; justify-content: space-between; align-items: center; }
@@ -132,7 +133,7 @@
     .desktop-nav { display: none; }
     .mobile-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 36px; padding: 0; font-size: 19px; }
     .header-actions [data-mobile-hide="true"] { display: none !important; }
-    .grid-5, .grid-4, .dashboard-grid, .kpi-grid, .client-overview-grid, .tender-toolbox { grid-template-columns: 1fr; }
+    .grid-5, .grid-4, .grid-3, .dashboard-grid, .kpi-grid, .client-overview-grid, .tender-toolbox { grid-template-columns: 1fr; }
     .grid-2, .quick-grid { grid-template-columns: 1fr; }
     .modal { width: min(440px, calc(100vw - 24px)); padding: 1rem; }
     .daily-grid { grid-template-columns: 1fr; }
@@ -453,7 +454,7 @@
       <div id="staff-form" style="display:none;margin-bottom:12px">
         <div class="grid-2">
           <div><div class="label">الاسم</div><input id="staff-name" type="text" placeholder="عمر"></div>
-          <div><div class="label">نوع المستند</div><select id="staff-type"><option>إقامة</option><option>رخصة عمل</option><option>تأمين</option><option>عقد</option><option>أخرى</option></select></div>
+          <div><div class="label">نوع المستند</div><select id="staff-type"><option>إقامة</option><option>رخصة عمل</option><option>جواز</option><option>تأمين</option><option>عقد</option><option>أخرى</option></select></div>
           <div><div class="label">تاريخ الانتهاء</div><input id="staff-expires" type="date"></div>
           <div><div class="label">ملاحظة</div><input id="staff-note" type="text" placeholder="اختياري"></div>
         </div>
@@ -947,6 +948,47 @@ function renderBankAccounts() {
 }
 const isTaxInvoice = c => Boolean(c.daftraInvId || c.taxInvoiceIssued || c.stage === 'فاتورة_صادرة' || c.stage === 'تم_التركيب' || c.stage === 'مكتمل');
 const isConfirmedSale = c => Boolean(c.quoteConfirmed || isTaxInvoice(c));
+const moneyValue = value => {
+  if (value === undefined || value === null || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const normalized = String(value)
+    .replace(/[٬,]/g, '')
+    .replace(/[^\d.-]/g, '');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+};
+const clientTotalAmount = c => moneyValue(c.offerPrice || c.daftraDetails?.totals?.total);
+const clientRefToken = id => `[wahet_client_id:${id}]`;
+function clientReceiptEntries(c) {
+  const ids = [c.id, c.daftraEstId ? 'est_' + c.daftraEstId : '', c.daftraInvId ? 'inv_' + c.daftraInvId : ''].filter(Boolean);
+  return financeEntries.filter(e => {
+    if ((e.status || 'draft') === 'rejected' || e.type !== 'إيراد') return false;
+    const note = String(e.note || e.statement || '');
+    return ids.some(id => note.includes(clientRefToken(id))) || (c.daftraNo && note.includes('#' + c.daftraNo) && note.includes(c.name || ''));
+  });
+}
+function clientPaidAmount(c) {
+  if (isTaxInvoice(c)) {
+    const paid = moneyValue(c.daftraDetails?.totals?.paid);
+    if (paid) return paid;
+    const balance = moneyValue(c.daftraDetails?.totals?.balance);
+    const total = clientTotalAmount(c);
+    if (total && balance) return Math.max(0, total - balance);
+  }
+  return clientReceiptEntries(c).reduce((sum, e) => sum + moneyValue(e.amount), 0);
+}
+function clientRemainingAmount(c) {
+  const explicitBalance = isTaxInvoice(c) ? moneyValue(c.daftraDetails?.totals?.balance) : 0;
+  if (explicitBalance) return explicitBalance;
+  return Math.max(0, clientTotalAmount(c) - clientPaidAmount(c));
+}
+function clientPaymentState(c) {
+  const total = clientTotalAmount(c);
+  const paid = clientPaidAmount(c);
+  const remaining = clientRemainingAmount(c);
+  return { total, paid, remaining, complete: total > 0 && remaining <= 0 };
+}
+const clientOpsDate = c => c.installDate || (isTaxInvoice(c) ? c.created : '');
 const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && (!followupDate(c) || followupDate(c) >= FOLLOWUP_START_DATE);
 const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && followupDate(c) && followupDate(c) < FOLLOWUP_START_DATE;
 const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام','مهرجان خارجي','فعالية خارجية','منطقة استقبال','موقع مؤقت','تجهيز فعاليات','مخيم فاخر'];
@@ -1476,8 +1518,8 @@ async function syncDaftra() {
         name: est.client_business_name || est.client_first_name || 'عميل',
         phone: est.client_phone || '', products: '—', location: est.client_state || '',
         offerPrice: total,
-        deposit: Math.round(total / 2),
-        remaining: Math.round(total / 2),
+        deposit: 0,
+        remaining: total,
         quoteConfirmed: false, taxInvoiceIssued: false,
         stage: 'عرض_سعر', installDate: '', notes: '', assignedTo: '—',
         created, updatedAt, followupDate: updatedAt || created,
@@ -1508,8 +1550,8 @@ async function syncDaftra() {
         phone: i.client_phone || ex?.phone || '',
         products: ex?.products || '—', location: i.client_state || ex?.location || '',
         offerPrice: total,
-        deposit: Math.round(total / 2),
-        remaining: Math.round(total / 2),
+        deposit: moneyValue(daftraDetailsFrom(i, inv).totals?.paid),
+        remaining: moneyValue(daftraDetailsFrom(i, inv).totals?.balance) || total,
         quoteConfirmed: true, taxInvoiceIssued: true,
         stage: ex?.stage === 'تم_التركيب' || ex?.stage === 'مكتمل' ? ex.stage : 'فاتورة_صادرة',
         installDate: ex?.installDate || '', notes: ex?.notes || '',
@@ -1646,13 +1688,38 @@ function contactClient(id) {
   render();
 }
 
-function setQuoteConfirmed(id, confirmed) {
+async function setQuoteConfirmed(id, confirmed) {
   const c = clients.find(x => x.id === id);
   if (!c || isTaxInvoice(c)) return;
   c.quoteConfirmed = confirmed;
   c.stage = confirmed ? 'موافق' : 'عرض_سعر';
   saveClientState(c);
   saveClients();
+  if (confirmed) {
+    const received = Number(prompt('هل تم استلام دفعة الآن؟ اكتب المبلغ أو اتركها 0', '0') || 0) || 0;
+    if (received > 0) {
+      normalizeBankAccounts();
+      const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
+      const selected = Number(prompt('اختر رقم الحساب الذي وصل له الإيراد:\n' + accountNames, '1') || 1) - 1;
+      const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
+      const refs = [clientRefToken(c.id)];
+      if (c.daftraEstId) refs.push(clientRefToken('est_' + c.daftraEstId));
+      await createFinanceEntry({
+        id: 'fin_receipt_' + Date.now(),
+        type: 'إيراد',
+        amount: received,
+        account,
+        person: c.name || '',
+        note: 'دفعة تأكيد عرض السعر: ' + (c.name || '') + (c.daftraNo ? ' #' + c.daftraNo : '') + ' ' + refs.join(' '),
+        category: 'إيراد تأجير',
+        attachment: '',
+        created: new Date().toISOString(),
+        createdBy: currentUser?.name || 'مدخل',
+        status: 'approved',
+        autoApprove: true
+      }, 'تم تأكيد العرض وتسجيل الدفعة: ' + money(received));
+    }
+  }
   closeModal();
   render();
 }
@@ -2042,24 +2109,30 @@ async function recordClientReceipt(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
   normalizeBankAccounts();
-  const amount = Number(prompt('كم الدفعة المستلمة من ' + (client.name || 'العميل') + '؟', String(client.deposit || client.remaining || client.offerPrice || 0)) || 0) || 0;
+  const state = clientPaymentState(client);
+  const amount = Number(prompt('كم الدفعة المستلمة من ' + (client.name || 'العميل') + '؟', String(state.remaining || state.total || 0)) || 0) || 0;
   if (!amount) { showMsg('أدخل مبلغ الدفعة'); return; }
   const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
   const selected = Number(prompt('اختر رقم الحساب:\n' + accountNames, '1') || 1) - 1;
   const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
+  const refs = [clientRefToken(client.id)];
+  if (client.daftraEstId) refs.push(clientRefToken('est_' + client.daftraEstId));
+  if (client.daftraInvId) refs.push(clientRefToken('inv_' + client.daftraInvId));
   await createFinanceEntry({
     id: 'fin_receipt_' + Date.now(),
     type: 'إيراد',
     amount,
     account,
     person: client.name || '',
-    note: 'دفعة مستلمة على عرض/فاتورة: ' + (client.name || '') + (client.daftraNo ? ' #' + client.daftraNo : ''),
+    note: 'دفعة مستلمة على عرض/فاتورة: ' + (client.name || '') + (client.daftraNo ? ' #' + client.daftraNo : '') + ' ' + refs.join(' '),
     category: 'إيراد تأجير',
     attachment: '',
     created: new Date().toISOString(),
     createdBy: currentUser?.name || 'مدخل',
-    status: 'draft'
-  }, 'تم تسجيل دفعة كمسودة: ' + money(amount) + ' في ' + account);
+    status: 'approved',
+    autoApprove: true
+  }, 'تم تسجيل الدفعة وإضافتها للحساب: ' + money(amount) + ' في ' + account);
+  render();
 }
 
 function startWhatsappDictation() {
@@ -3006,20 +3079,25 @@ function renderOperations() {
   const install = document.getElementById('install-list');
   if (install) {
     const rows = clients
-      .filter(c => c.installDate && c.stage !== 'استغنى' && isConfirmedSale(c))
-      .sort((a,b)=>new Date(a.installDate)-new Date(b.installDate));
+      .filter(c => clientOpsDate(c) && c.stage !== 'استغنى' && isConfirmedSale(c))
+      .sort((a,b)=>new Date(clientOpsDate(a))-new Date(clientOpsDate(b)));
     install.innerHTML = rows.length ? rows.map(c => {
-        const d = daysUntil(c.installDate);
+        const opDate = clientOpsDate(c);
+        const d = daysUntil(opDate);
         const label = d === 0 ? 'اليوم' : d === 1 ? 'غداً' : d !== null ? 'بعد ' + d + ' يوم' : 'بدون مدة';
-        const color = d === 0 ? '#E24B4A' : d !== null && d <= 2 ? '#EF9F27' : '#85B7EB';
-        return `<div class="list-row">
+        const payment = clientPaymentState(c);
+        const color = payment.complete ? '#5DCAA5' : '#E24B4A';
+        const dateColor = d === 0 ? '#E24B4A' : d !== null && d <= 2 ? '#EF9F27' : '#85B7EB';
+        return `<div class="list-row" style="border-right:4px solid ${color}">
           <div>
             <div style="font-weight:600">${c.name}</div>
             <div class="text-secondary" style="margin-top:3px">${c.products || '—'} — ${c.location || 'بدون موقع'}</div>
             <div class="text-secondary" style="margin-top:3px">${LABELS[c.stage] || c.stage} — ${isTaxInvoice(c) ? 'فاتورة ضريبية' : 'عرض مؤكد'}</div>
+            <div class="text-secondary" style="margin-top:3px">المسدد: ${money(payment.paid)} — المتبقي: ${money(payment.remaining)}</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-            ${statusPill(c.installDate + ' / ' + label, color)}
+            ${statusPill(payment.complete ? 'مسدد كامل' : 'متبقي سداد', color)}
+            ${statusPill(opDate + ' / ' + label, dateColor)}
             <button class="btn-secondary" onclick="showModal('${c.id}')">تفاصيل</button>
           </div>
         </div>`;
@@ -3166,8 +3244,10 @@ function renderDaftraDetails(c) {
     ['الخصم', totals.discount],
     ['ضريبة القيمة المضافة', totals.tax],
     ['الإجمالي', totals.total || (c.offerPrice ? c.offerPrice.toLocaleString() + ' ر.س' : '')],
-    ['المدفوع', totals.paid || (c.deposit ? c.deposit.toLocaleString() + ' ر.س' : '')],
-    ['المتبقي', totals.balance || (c.remaining ? c.remaining.toLocaleString() + ' ر.س' : '')],
+    ...(isTaxInvoice(c) ? [
+      ['المدفوع في دفترة', totals.paid],
+      ['المتبقي في دفترة', totals.balance],
+    ] : []),
   ].filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '0');
   return `
     <div style="border-top:0.5px solid #d8e0e7;margin-top:12px;padding-top:12px">
@@ -3206,6 +3286,29 @@ function renderDaftraDetails(c) {
     </div>`;
 }
 
+function renderPaymentSummary(c) {
+  const state = clientPaymentState(c);
+  if (!isConfirmedSale(c) && !isTaxInvoice(c)) return '';
+  const sourceLabel = isTaxInvoice(c) ? 'حسب مدفوعات فاتورة دفترة' : 'حسب الدفعات المسجلة في البرنامج';
+  const color = state.complete ? '#5DCAA5' : '#E24B4A';
+  const rows = clientReceiptEntries(c);
+  return `<div style="background:#f7f9fb;border:0.5px solid #d8e0e7;border-radius:8px;padding:10px 12px;margin:10px 0">
+    <div class="flex-between" style="gap:8px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:13px;font-weight:800">حالة السداد</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:2px">${sourceLabel}</div>
+      </div>
+      ${statusPill(state.complete ? 'مكتمل السداد' : 'متبقي سداد', color)}
+    </div>
+    <div class="grid-3" style="margin-top:10px">
+      <div><div class="label">الإجمالي</div><div style="font-weight:800">${money(state.total)}</div></div>
+      <div><div class="label">المسدد</div><div style="font-weight:800;color:#5DCAA5">${money(state.paid)}</div></div>
+      <div><div class="label">المتبقي</div><div style="font-weight:800;color:${state.remaining > 0 ? '#E24B4A' : '#5DCAA5'}">${money(state.remaining)}</div></div>
+    </div>
+    ${!isTaxInvoice(c) && rows.length ? `<div style="margin-top:10px">${rows.map(e => `<div class="text-secondary" style="font-size:11px;line-height:1.7">${new Date(e.created).toLocaleDateString('ar-SA')} — ${money(e.amount)} — ${htmlEscape(e.account || 'حساب غير محدد')}</div>`).join('')}</div>` : ''}
+  </div>`;
+}
+
 function showModal(id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
@@ -3236,6 +3339,7 @@ function showModal(id) {
       ${c.source === 'daftra' ? statusPill('دفترة', '#85B7EB') : statusPill('يدوي', '#9a9898')}
       ${c.updatedAt ? statusPill('آخر تعديل ' + c.updatedAt, '#9a9898') : ''}
     </div>
+    ${renderPaymentSummary(c)}
     ${c.source === 'daftra' ? renderDaftraDetails(c) : ''}
     <div class="flex gap-8" style="flex-wrap:wrap">
       ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
@@ -3289,7 +3393,7 @@ function renderClientOverview() {
   }).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد عروض سعر تنتظر المتابعة</div>';
 
   const quoteRows = clients
-    .filter(c => c.created)
+    .filter(c => c.created && !isTaxInvoice(c))
     .sort((a, b) => new Date(b.created) - new Date(a.created));
   monthlyCount.textContent = quoteRows.length;
 
@@ -3332,7 +3436,7 @@ function renderClientOverview() {
       </div>
     </div>`;
   }).join('');
-  const noDate = clients.filter(c => !c.created);
+  const noDate = clients.filter(c => !c.created && !isTaxInvoice(c));
   const noDateHtml = noDate.length ? `<div style="margin-top:10px">
     <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:#FAC775">عروض بدون تاريخ عرض</div>
     ${noDate.map(c => `<div class="list-row">
