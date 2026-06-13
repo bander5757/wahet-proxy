@@ -90,6 +90,27 @@ create table if not exists app_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists chart_accounts (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  name_ar text not null,
+  level integer not null check (level between 1 and 5),
+  parent_code text references chart_accounts(code),
+  account_type text not null check (account_type in ('asset', 'liability', 'equity', 'revenue', 'expense')),
+  normal_balance text not null check (normal_balance in ('debit', 'credit')),
+  is_postable boolean not null default false,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint chart_accounts_level_code_length_check check (
+    (level = 1 and char_length(code) = 1) or
+    (level = 2 and char_length(code) = 2) or
+    (level = 3 and char_length(code) = 3) or
+    (level = 4 and char_length(code) = 6) or
+    (level = 5 and char_length(code) = 7)
+  )
+);
+
 create table if not exists finance_entries (
   id uuid primary key default gen_random_uuid(),
   entry_type text not null check (entry_type in ('expense', 'custody', 'income', 'loan', 'debt', 'transfer')),
@@ -190,6 +211,8 @@ alter table tenders add column if not exists last_seen_at timestamptz not null d
 create index if not exists idx_rental_quotes_status on rental_quotes(quote_status);
 create index if not exists idx_rental_quotes_install_date on rental_quotes(install_date);
 create index if not exists idx_daftra_quote_states_local_key on daftra_quote_states(local_key);
+create index if not exists idx_chart_accounts_parent_code on chart_accounts(parent_code);
+create index if not exists idx_chart_accounts_postable_active on chart_accounts(is_postable, is_active);
 create index if not exists idx_finance_entries_entry_date on finance_entries(entry_date);
 create index if not exists idx_staff_documents_expires_on on staff_documents(expires_on);
 create index if not exists idx_vehicle_tasks_due_on on vehicle_tasks(due_on);

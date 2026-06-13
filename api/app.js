@@ -201,6 +201,102 @@ function generalAlertRow(row) {
   };
 }
 
+function chartAccountRow(row) {
+  return {
+    id: row.id,
+    code: row.code,
+    name_ar: row.name_ar,
+    level: Number(row.level),
+    parent_code: row.parent_code || "",
+    account_type: row.account_type,
+    normal_balance: row.normal_balance,
+    is_postable: Boolean(row.is_postable),
+    is_active: Boolean(row.is_active),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+const ACCOUNT_TYPE_BY_ROOT = {
+  "1": "asset",
+  "2": "liability",
+  "3": "equity",
+  "4": "revenue",
+  "5": "expense",
+};
+const NORMAL_BALANCE_BY_TYPE = {
+  asset: "debit",
+  expense: "debit",
+  liability: "credit",
+  equity: "credit",
+  revenue: "credit",
+};
+const EXPECTED_CODE_LENGTH_BY_LEVEL = { 1: 1, 2: 2, 3: 3, 4: 6, 5: 7 };
+
+function extractChartCode(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^\d+/);
+  return match ? match[0] : raw;
+}
+
+function inferAccountType(code) {
+  return ACCOUNT_TYPE_BY_ROOT[String(code || "")[0]] || null;
+}
+
+function expectedParentCode(code, level) {
+  const value = String(code || "");
+  if (level <= 1) return null;
+  if (level === 2) return value.slice(0, 1);
+  if (level === 3) return value.slice(0, 2);
+  if (level === 4) return value.slice(0, 3);
+  if (level === 5) return value.slice(0, 6);
+  return null;
+}
+
+function validateChartAccountPayload(payload) {
+  const code = String(payload.code || "").trim();
+  const name = String(payload.name_ar || payload.name || "").trim();
+  const level = Number(payload.level);
+  if (!/^\d+$/.test(code)) {
+    const err = new Error("كود الحساب يجب أن يكون أرقاماً فقط");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!name) {
+    const err = new Error("اسم الحساب مطلوب");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!EXPECTED_CODE_LENGTH_BY_LEVEL[level] || code.length !== EXPECTED_CODE_LENGTH_BY_LEVEL[level]) {
+    const err = new Error("مستوى الحساب لا يتوافق مع طول الكود");
+    err.statusCode = 400;
+    throw err;
+  }
+  const accountType = inferAccountType(code);
+  if (!accountType) {
+    const err = new Error("نوع الحساب غير معروف من أول رقم في الكود");
+    err.statusCode = 400;
+    throw err;
+  }
+  const parentCode = level === 1 ? null : String(payload.parent_code || expectedParentCode(code, level) || "").trim();
+  const expectedParent = expectedParentCode(code, level);
+  if (level > 1 && parentCode !== expectedParent) {
+    const err = new Error("الحساب لا يتبع الأب الصحيح");
+    err.statusCode = 400;
+    throw err;
+  }
+  return {
+    code,
+    name_ar: name,
+    level,
+    parent_code: parentCode,
+    account_type: accountType,
+    normal_balance: NORMAL_BALANCE_BY_TYPE[accountType],
+    is_postable: level === 5,
+    is_active: payload.is_active !== false,
+  };
+}
+
 function tenderRow(row) {
   return {
     id: row.id,
@@ -309,6 +405,115 @@ async function requireDefaultAccount(client, accountName) {
     [name, type]
   );
   return inserted.rows[0].id;
+}
+
+async function listChartAccounts(client, onlyPostable = false) {
+  const where = onlyPostable ? "where is_active = true and is_postable = true" : "";
+  const result = await client.query(`
+    select id, code, name_ar, level, parent_code, account_type, normal_balance,
+           is_postable, is_active, created_at, updated_at
+    from chart_accounts
+    ${where}
+    order by code asc
+  `);
+  return result.rows.map(chartAccountRow);
+}
+
+async function validatePostableChartAccount(client, category) {
+  const code = extractChartCode(category);
+  if (!code) {
+    const err = new Error("الحساب المحاسبي مطلوب");
+    err.statusCode = 400;
+    throw err;
+  }
+  const result = await client.query(
+    `select id, code, name_ar, level, parent_code, account_type, normal_balance,
+            is_postable, is_active, created_at, updated_at
+     from chart_accounts
+     where code = $1
+     limit 1`,
+    [code]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    const err = new Error("الحساب المحاسبي غير موجود في الدليل المعتمد");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!row.is_active) {
+    const err = new Error("الحساب المحاسبي موقوف. اختر حساباً نشطاً.");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!row.is_postable) {
+    const err = new Error("هذا الحساب رئيسي ولا يمكن الترحيل عليه. اختر حساباً فرعياً قابلاً للترحيل.");
+    err.statusCode = 400;
+    throw err;
+  }
+  return chartAccountRow(row);
+}
+
+async function importChartAccounts(client, payload) {
+  const rows = Array.isArray(payload.accounts) ? payload.accounts : [];
+  if (!rows.length) {
+    const err = new Error("لا توجد حسابات للاستيراد");
+    err.statusCode = 400;
+    throw err;
+  }
+  const normalized = rows.map(validateChartAccountPayload);
+  const codes = new Set();
+  for (const account of normalized) {
+    if (codes.has(account.code)) {
+      const err = new Error("يوجد كود حساب مكرر: " + account.code);
+      err.statusCode = 400;
+      throw err;
+    }
+    codes.add(account.code);
+  }
+  for (const account of normalized) {
+    if (account.level > 1 && !codes.has(account.parent_code)) {
+      const err = new Error("حساب فرعي بدون أب صحيح: " + account.code);
+      err.statusCode = 400;
+      throw err;
+    }
+    if (account.parent_code && !account.code.startsWith(account.parent_code)) {
+      const err = new Error("الحساب لا يتبع الأب الصحيح: " + account.code);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  await client.query("begin");
+  try {
+    await client.query("delete from chart_accounts");
+    const byLevel = normalized.slice().sort((a, b) => a.level - b.level || a.code.localeCompare(b.code));
+    for (const account of byLevel) {
+      await client.query(
+        `insert into chart_accounts
+          (code, name_ar, level, parent_code, account_type, normal_balance, is_postable, is_active, updated_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,now())`,
+        [
+          account.code,
+          account.name_ar,
+          account.level,
+          account.parent_code,
+          account.account_type,
+          account.normal_balance,
+          account.is_postable,
+          account.is_active,
+        ]
+      );
+    }
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    if (err.code === "23505") {
+      err.message = "يوجد كود حساب مكرر في قاعدة البيانات";
+      err.statusCode = 400;
+    }
+    throw err;
+  }
+  return listChartAccounts(client);
 }
 
 async function listFinance(client) {
@@ -1000,6 +1205,7 @@ async function createFinance(client, payload, user) {
 
   await client.query("begin");
   try {
+    const chartAccount = await validatePostableChartAccount(client, payload.category);
     const accountId = await requireDefaultAccount(client, payload.account || "الحساب الرسمي");
     let relatedUserId = null;
     if (payload.person) {
@@ -1018,7 +1224,7 @@ async function createFinance(client, payload, user) {
         (entry_type, amount, account_id, related_user_id, category, statement, status, entry_date)
        values ($1, $2, $3, $4, $5, $6, $7, current_date)
        returning *`,
-      [entryType, amount, accountId, relatedUserId, payload.category || null, String(payload.note || payload.statement).trim(), initialStatus]
+      [entryType, amount, accountId, relatedUserId, `${chartAccount.code} - ${chartAccount.name_ar}`, String(payload.note || payload.statement).trim(), initialStatus]
     );
     if (user?.id) {
       await client.query("update finance_entries set entered_by = $1 where id = $2", [user.id, inserted.rows[0].id]);
@@ -1094,14 +1300,16 @@ async function updateFinanceEntry(client, payload, user) {
     throw err;
   }
   const accountId = await requireDefaultAccount(client, payload.account || "الحساب الرسمي");
+  const categoryPatch = payload.category ? await validatePostableChartAccount(client, payload.category) : null;
   const result = await client.query(
     `update finance_entries
      set amount = $1,
          account_id = $2,
-         statement = case when $3::text <> '' then $3::text else statement end
-     where id = $4
+         statement = case when $3::text <> '' then $3::text else statement end,
+         category = case when $4::text <> '' then $4::text else category end
+     where id = $5
      returning *`,
-    [amount, accountId, String(payload.note || payload.statement || "").trim(), id]
+    [amount, accountId, String(payload.note || payload.statement || "").trim(), categoryPatch ? `${categoryPatch.code} - ${categoryPatch.name_ar}` : "", id]
   );
   if (!result.rows[0]) {
     const err = new Error("الحركة غير موجودة");
@@ -1148,6 +1356,7 @@ async function dashboard(client, user) {
   const daftraClientsCache = await getDaftraClientsCache(client);
   const bankStatement = await getBankStatementCache(client);
   const financeMeta = await getFinanceMeta(client);
+  const chartAccounts = await listChartAccounts(client);
   const users = await client.query(
     "select id, name, phone, email, role, is_active from app_users where is_active = true order by created_at asc"
   );
@@ -1167,6 +1376,7 @@ async function dashboard(client, user) {
     },
     bankStatement,
     financeMeta,
+    chartAccounts,
     settings: {
       daftra: daftraSettings,
     },
@@ -1182,6 +1392,8 @@ module.exports = async function handler(req, res) {
   try {
     client = await getPool().connect();
     const path = String(req.query.path || req.url.split("/api/app")[1] || "/").split("?")[0];
+    const requestUrl = new URL(req.url || "/", "http://local");
+    const query = { ...(req.query || {}), ...Object.fromEntries(requestUrl.searchParams.entries()) };
     const token = req.headers["x-wahet-token"] || "";
     const user = await getUserFromToken(client, token);
 
@@ -1195,6 +1407,16 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "GET" && path === "/finance") {
       return res.status(200).json({ ok: true, data: await listFinance(client) });
+    }
+
+    if (req.method === "GET" && path === "/chart-accounts") {
+      const onlyPostable = query.postable === "1" || query.postable === "true";
+      return res.status(200).json({ ok: true, data: await listChartAccounts(client, onlyPostable) });
+    }
+
+    if (req.method === "POST" && path === "/chart-accounts/import") {
+      const accounts = await importChartAccounts(client, req.body || {});
+      return res.status(200).json({ ok: true, data: accounts });
     }
 
     if (req.method === "GET" && path === "/quote-states") {
