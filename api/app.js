@@ -489,12 +489,6 @@ async function validatePostableChartAccount(client, chartAccountId) {
     err.statusCode = 400;
     throw err;
   }
-  const duplicates = await client.query("select count(*)::int as count from chart_accounts where code = $1", [row.code]);
-  if (duplicates.rows[0]?.count > 1) {
-    const err = new Error("هذا الحساب له كود مكرر في الدليل. لا يتم الترحيل عليه حتى يراجع المحاسب المسار ويعتمده.");
-    err.statusCode = 400;
-    throw err;
-  }
   return chartAccountRow(row);
 }
 

@@ -381,7 +381,7 @@
       </div>
       <div class="grid-2 mt-8">
         <div><div class="label">من أي حساب</div><select id="wa-entry-account"></select></div>
-        <div><div class="label">الحساب المحاسبي عند الحاجة</div><select id="wa-entry-category"></select></div>
+        <div><div class="label">الحساب المحاسبي عند الحاجة</div><select id="wa-entry-category" onchange="warnDuplicateChartAccount(this.value)"></select></div>
       </div>
       <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
         <button class="btn-secondary" onclick="previewWhatsappEntry()">تحليل الرسالة</button>
@@ -606,7 +606,7 @@
       <div><div class="label">النوع</div><select id="q-type" onchange="refreshAccountingCategorySelects(this.value)"><option>مصروف</option><option>عهدة</option><option>إيراد</option><option>سلفة</option><option>دين</option><option>تحويل</option></select></div>
       <div><div class="label">المبلغ</div><input id="q-amount" type="number" inputmode="decimal"></div>
       <div><div class="label">الحساب</div><select id="q-account"><option>الحساب الرسمي</option><option>الحساب الفرعي</option><option>كاش</option></select></div>
-      <div><div class="label">الحساب المحاسبي</div><select id="q-category"></select></div>
+      <div><div class="label">الحساب المحاسبي</div><select id="q-category" onchange="warnDuplicateChartAccount(this.value)"></select></div>
       <div><div class="label">الشخص</div><input id="q-person" type="text" placeholder="عمر / ابو فايز / صدام / المورد"></div>
       <div style="grid-column:1/-1"><div class="label">البيان</div><textarea id="q-note" rows="3" placeholder="مثال: عهدة لعمر لشراء مستلزمات تركيب"></textarea></div>
       <div style="grid-column:1/-1"><div class="label">صورة الإيصال</div><input id="q-file" type="file" accept="image/*,.pdf"></div>
@@ -627,7 +627,7 @@
     <input id="custody-spend-entry-id" type="hidden">
     <div class="grid-2" style="margin-bottom:10px">
       <div><div class="label">مبلغ الصرف</div><input id="custody-spend-amount" type="number" inputmode="decimal"></div>
-      <div><div class="label">الحساب المحاسبي</div><select id="custody-spend-category"></select></div>
+      <div><div class="label">الحساب المحاسبي</div><select id="custody-spend-category" onchange="warnDuplicateChartAccount(this.value)"></select></div>
       <div style="grid-column:1/-1"><div class="label">شرح الصرف</div><textarea id="custody-spend-note" rows="3" placeholder="مثال: شراء قطعة غيار"></textarea></div>
       <div style="grid-column:1/-1"><div class="label">إرفاق فاتورة أو تصوير بالكاميرا</div><input id="custody-spend-file" type="file" accept="image/*,.pdf" capture="environment"></div>
     </div>
@@ -1148,8 +1148,14 @@ const defaultBankAccounts = () => [
   { id: 'acc_cash', name: 'كاش', openingBalance: 0 }
 ];
 const accountingLabel = account => `${account.code} - ${account.name_ar || account.name || ""}`;
-const accountingOptionLabel = account => `${account.code} ${account.name_ar || account.name || ""}${account.full_path ? " — " + account.full_path : ""}`;
+const accountingOptionLabel = account => `[${account.code}] ${account.name_ar || account.name || ""}${account.full_path ? " — " + account.full_path : ""}`;
 const chartAccountById = id => chartAccounts.find(account => account.id === id);
+const duplicateChartCode = account => account && chartAccounts.filter(a => a.code === account.code).length > 1;
+const duplicateChartWarningText = 'تنبيه: هذا الحساب له كود مكرر في الدليل. تم الاعتماد على المعرف الداخلي والمسار الكامل للتمييز.';
+const warnDuplicateChartAccount = accountId => {
+  const account = chartAccountById(accountId);
+  if (duplicateChartCode(account)) showMsg(duplicateChartWarningText);
+};
 const postableChartAccounts = () => chartAccounts.filter(a => a.is_active && a.is_postable);
 const firstPostableAccount = predicate => postableChartAccounts().find(predicate);
 const accountValue = account => account ? account.id : '';
@@ -2098,6 +2104,7 @@ async function saveQuickEntry() {
   if (!amount) { alert('أدخل المبلغ'); return; }
   if (!note) { alert('أدخل البيان'); return; }
   if (!chartAccountId) { alert('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  warnDuplicateChartAccount(chartAccountId);
   const entry = {
     id: 'fin_' + Date.now(),
     type, amount, account, person, note,
@@ -2256,6 +2263,7 @@ async function saveWhatsappDraft() {
   if (!entry) return;
   if (!entry.amount) { showMsg('أدخل مبلغ واضح في الرسالة قبل إنشاء المسودة'); return; }
   if (!entry.chartAccountId) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  warnDuplicateChartAccount(entry.chartAccountId);
   const savedEntry = { ...entry, id: 'fin_wa_' + Date.now() };
   let savedRemote = false;
   if (apiOnline) {
@@ -2288,6 +2296,7 @@ async function saveWhatsappDraft() {
 }
 
 async function createFinanceEntry(entry, successText) {
+  if (entry.chartAccountId) warnDuplicateChartAccount(entry.chartAccountId);
   let savedRemote = false;
   if (apiOnline) {
     try {
@@ -2909,6 +2918,7 @@ async function saveCustodySpend() {
   if (!amount) { showMsg('أدخل مبلغ الصرف'); return; }
   if (!note) { showMsg('أدخل شرح الصرف'); return; }
   if (!chartAccountId) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  warnDuplicateChartAccount(chartAccountId);
   if (amount > custodyRemaining(entry)) { showMsg('مبلغ الصرف أكبر من المتبقي في العهدة'); return; }
   custodySpends[entryId] = custodySpendLines(entryId).concat([{
     id: 'spend_' + Date.now(),

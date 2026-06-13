@@ -51,6 +51,9 @@ const accountantChartAsWritten = [
 const warnings = validateImportedChart(accountantChartAsWritten);
 assert.ok(warnings.some(group => group.code === "511001" && group.accounts.length === 2), "duplicate 511001 must be warning, not error");
 assert.ok(warnings.some(group => group.code === "5110023" && group.accounts.length === 2), "duplicate 5110023 must be warning, not error");
+const duplicatePostableAccount = accountantChartAsWritten.find(account => account.id === "a7");
+assert.ok(duplicatePostableAccount.id, "duplicate postable account can be selected by chart_account_id");
+assert.equal(duplicatePostableAccount.is_postable, true, "duplicate postable account remains postable");
 
 const tentSupplies = accountantChartAsWritten.find(account => account.name_ar === "مستلزمات الخيام");
 const payroll = accountantChartAsWritten.find(account => account.name_ar === "الرواتب والاضافات");
@@ -63,6 +66,13 @@ assert.ok(!accountantChartAsWritten.some(account => account.code === "2210021"),
 const apiSource = fs.readFileSync("api/app.js", "utf8");
 assert.match(apiSource, /chart_account_id/, "finance entries must store chart_account_id");
 assert.match(apiSource, /validatePostableChartAccount\(client, payload\.chartAccountId\)/, "finance creation must validate by internal account id");
+assert.match(apiSource, /if \(!id\)[\s\S]{0,120}الحساب المحاسبي مطلوب/, "code-only finance saves must be rejected when chart_account_id is missing");
 assert.doesNotMatch(apiSource, /where code = \$1[\s\S]{0,120}\[code\]/, "finance validation must not select chart account by code");
+assert.doesNotMatch(apiSource, /لا يتم الترحيل عليه حتى يراجع المحاسب/, "duplicate codes must not block finance saves");
+
+const uiSource = fs.readFileSync("index.html", "utf8");
+assert.match(uiSource, /تم الاعتماد على المعرف الداخلي والمسار الكامل للتمييز/, "duplicate code warning must be shown without blocking");
+assert.match(uiSource, /chartAccountId/, "UI must send chartAccountId for finance entries");
+assert.match(apiSource, /category: row\.category \|\| ""/, "old finance entries with text category must still render");
 
 console.log("chart account import regression ok");
