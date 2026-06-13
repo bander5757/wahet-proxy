@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node scripts/local-server.js",
-    "test": "node --check api/daftra.js && node --check api/app.js && node --check scripts/db-init.js && node --check scripts/sync-daftra-cache.js",
+    "test": "node --check api/daftra.js && node --check api/app.js && node --check scripts/db-init.js && node --check scripts/sync-daftra-cache.js && node scripts/test-chart-account-import.js",
     "db:init": "node scripts/db-init.js",
     "db:init:seed": "node scripts/db-init.js --seed",
     "sync:daftra-cache": "node scripts/sync-daftra-cache.js"
