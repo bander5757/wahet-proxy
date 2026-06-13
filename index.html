@@ -344,6 +344,16 @@
     <div class="section" style="margin-top:12px">
       <div class="flex-between mb-12">
         <div>
+          <div style="font-size:15px;font-weight:600">الدليل المحاسبي المعتمد</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">قوائم الإدخال المالي مبنية على الحسابات النهائية بعد تصحيح التكرارات</div>
+        </div>
+        <span id="accounting-guide-count" class="badge" style="background:#1a3a5c;color:#85B7EB">0 حساب</span>
+      </div>
+      <div id="accounting-guide-view"></div>
+    </div>
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
           <div style="font-size:15px;font-weight:600">إضافة من الواتساب</div>
           <div style="font-size:11px;color:#9a9898;margin-top:2px">تحويل رسالة أو صوت واتساب إلى مسودة مالية للمراجعة</div>
         </div>
@@ -371,7 +381,7 @@
       </div>
       <div class="grid-2 mt-8">
         <div><div class="label">من أي حساب</div><select id="wa-entry-account"></select></div>
-        <div><div class="label">نوع الصرف عند الحاجة</div><select id="wa-entry-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
+        <div><div class="label">الحساب المحاسبي عند الحاجة</div><select id="wa-entry-category"></select></div>
       </div>
       <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
         <button class="btn-secondary" onclick="previewWhatsappEntry()">تحليل الرسالة</button>
@@ -593,10 +603,10 @@
       <button class="btn-secondary" onclick="closeQuickEntry()">إغلاق</button>
     </div>
     <div class="grid-2" style="margin-bottom:10px">
-      <div><div class="label">النوع</div><select id="q-type"><option>مصروف</option><option>عهدة</option><option>إيراد</option><option>سلفة</option><option>دين</option><option>تحويل</option></select></div>
+      <div><div class="label">النوع</div><select id="q-type" onchange="refreshAccountingCategorySelects(this.value)"><option>مصروف</option><option>عهدة</option><option>إيراد</option><option>سلفة</option><option>دين</option><option>تحويل</option></select></div>
       <div><div class="label">المبلغ</div><input id="q-amount" type="number" inputmode="decimal"></div>
       <div><div class="label">الحساب</div><select id="q-account"><option>الحساب الرسمي</option><option>الحساب الفرعي</option><option>كاش</option></select></div>
-      <div><div class="label">التصنيف</div><select id="q-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
+      <div><div class="label">الحساب المحاسبي</div><select id="q-category"></select></div>
       <div><div class="label">الشخص</div><input id="q-person" type="text" placeholder="عمر / ابو فايز / صدام / المورد"></div>
       <div style="grid-column:1/-1"><div class="label">البيان</div><textarea id="q-note" rows="3" placeholder="مثال: عهدة لعمر لشراء مستلزمات تركيب"></textarea></div>
       <div style="grid-column:1/-1"><div class="label">صورة الإيصال</div><input id="q-file" type="file" accept="image/*,.pdf"></div>
@@ -617,7 +627,7 @@
     <input id="custody-spend-entry-id" type="hidden">
     <div class="grid-2" style="margin-bottom:10px">
       <div><div class="label">مبلغ الصرف</div><input id="custody-spend-amount" type="number" inputmode="decimal"></div>
-      <div><div class="label">نوع الصرف</div><select id="custody-spend-category"><option>تركيب</option><option>سيارات</option><option>عمالة</option><option>مواد</option><option>تسويق</option><option>إدارة</option><option>أخرى</option></select></div>
+      <div><div class="label">الحساب المحاسبي</div><select id="custody-spend-category"></select></div>
       <div style="grid-column:1/-1"><div class="label">شرح الصرف</div><textarea id="custody-spend-note" rows="3" placeholder="مثال: شراء قطعة غيار"></textarea></div>
       <div style="grid-column:1/-1"><div class="label">إرفاق فاتورة أو تصوير بالكاميرا</div><input id="custody-spend-file" type="file" accept="image/*,.pdf" capture="environment"></div>
     </div>
@@ -903,6 +913,49 @@ function refreshFinanceAccountSelects() {
   });
 }
 
+function refreshAccountingCategorySelects(type) {
+  const quickType = type || document.getElementById('q-type')?.value || 'مصروف';
+  const quickOptions = accountingOptions(quickType);
+  const expenseOptions = accountingOptions('مصروف');
+  const setOptions = (id, options) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const current = el.value;
+    el.innerHTML = options;
+    if (current && [...el.options].some(o => o.value === current)) el.value = current;
+  };
+  setOptions('q-category', quickOptions);
+  setOptions('wa-entry-category', expenseOptions);
+  setOptions('custody-spend-category', expenseOptions);
+}
+
+function renderAccountingGuide() {
+  const el = document.getElementById('accounting-guide-view');
+  const count = document.getElementById('accounting-guide-count');
+  if (count) count.textContent = ACCOUNTING_CHART.length + ' حساب';
+  if (!el) return;
+  const groups = ACCOUNTING_CHART.reduce((acc, a) => {
+    const key = a.group.split('/')[0].trim();
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(a);
+    return acc;
+  }, {});
+  el.innerHTML = `
+    <div class="grid-2">
+      ${Object.entries(groups).map(([group, rows]) => `<div class="stat-card">
+        <div class="flex-between mb-8">
+          <div style="font-size:13px;font-weight:800">${htmlEscape(group)}</div>
+          ${statusPill(String(rows.length), '#85B7EB')}
+        </div>
+        ${rows.slice(0, 8).map(a => `<div class="text-secondary" style="font-size:11px;line-height:1.8">${a.code} — ${htmlEscape(a.name)}</div>`).join('')}
+        ${rows.length > 8 ? `<div class="text-secondary" style="font-size:11px;margin-top:4px">+ ${rows.length - 8} حسابات أخرى</div>` : ''}
+      </div>`).join('')}
+    </div>
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:10px;color:#FAC775">
+      تم تصحيح التكرارات: مستلزمات الخيام أصبحت 511002، الرواتب والإضافات أصبحت 5110024، وتساهيل أصبحت 2210021.
+    </div>`;
+}
+
 function accountBalance(accountName) {
   normalizeBankAccounts();
   const account = bankAccounts.find(a => a.name === accountName);
@@ -1065,6 +1118,69 @@ const defaultBankAccounts = () => [
   { id: 'acc_secondary', name: 'الحساب الفرعي', openingBalance: 0 },
   { id: 'acc_cash', name: 'كاش', openingBalance: 0 }
 ];
+const ACCOUNTING_CHART = [
+  { code:'1110011', name:'مكيفات', group:'الأصول الثابتة / الأجهزة', type:'asset' },
+  { code:'1120021', name:'خيام', group:'الأصول الثابتة / الأثاث', type:'asset' },
+  { code:'1210011', name:'ح/ الراجحي', group:'الأصول المتداولة / البنوك', type:'asset' },
+  { code:'1210021', name:'ح/ فيصل', group:'الأصول المتداولة / البنوك', type:'asset' },
+  { code:'1210031', name:'ح/ابوفايز', group:'الأصول المتداولة / البنوك', type:'asset' },
+  { code:'1210041', name:'عهدة عمر', group:'الأصول المتداولة / الصندوق', type:'asset' },
+  { code:'1220011', name:'خيام ومكيفات', group:'الأصول المتداولة / المخزون', type:'asset' },
+  { code:'1230011', name:'الدار البيضاء', group:'الأصول المتداولة / العملاء', type:'asset' },
+  { code:'1230012', name:'سعادتي', group:'الأصول المتداولة / العملاء', type:'asset' },
+  { code:'1230013', name:'التلال', group:'الأصول المتداولة / العملاء', type:'asset' },
+  { code:'1240011', name:'عمر', group:'الأصول المتداولة / سلف الموظفين', type:'asset' },
+  { code:'1240012', name:'عمار النعمة', group:'الأصول المتداولة / سلف الموظفين', type:'asset' },
+  { code:'1240013', name:'أخرى', group:'الأصول المتداولة / سلف الموظفين', type:'asset' },
+  { code:'2110011', name:'موردون المكيفات', group:'الخصوم المتداولة / الموردون', type:'liability' },
+  { code:'2110012', name:'موردون الخيام', group:'الخصوم المتداولة / الموردون', type:'liability' },
+  { code:'2110013', name:'موردون المواد', group:'الخصوم المتداولة / الموردون', type:'liability' },
+  { code:'2110021', name:'الزاجل', group:'الخصوم المتداولة / شركات الشحن', type:'liability' },
+  { code:'2110031', name:'مستحقات', group:'الخصوم المتداولة / أطراف أخرى', type:'liability' },
+  { code:'2120011', name:'شيك', group:'الخصوم المتداولة / أوراق الدفع', type:'liability' },
+  { code:'2130011', name:'مكيفات', group:'الخصوم المتداولة / مجمع الإهلاك', type:'liability' },
+  { code:'2130021', name:'خيام', group:'الخصوم المتداولة / مجمع الإهلاك', type:'liability' },
+  { code:'2140011', name:'ضريبة القيمة المضافة - المدخلات', group:'الخصوم المتداولة / الضريبة', type:'tax' },
+  { code:'2140012', name:'ضريبة القيمة المضافة - المخرجات', group:'الخصوم المتداولة / الضريبة', type:'tax' },
+  { code:'2140013', name:'ضريبة القيمة المضافة - التسويات', group:'الخصوم المتداولة / الضريبة', type:'tax' },
+  { code:'2210011', name:'الراجحي', group:'خصوم طويلة الأجل / قروض البنوك', type:'liability' },
+  { code:'2210021', name:'تساهيل', group:'خصوم طويلة الأجل / شركات التمويل', type:'liability', correctedFrom:'2210012' },
+  { code:'3110011', name:'رأس المال', group:'حقوق الملكية / رأس المال', type:'equity' },
+  { code:'3210011', name:'أرباح أو خسائر', group:'حقوق الملكية / أرباح أو خسائر', type:'equity' },
+  { code:'3310011', name:'الملاك', group:'حقوق الملكية / جاري الشركاء', type:'equity' },
+  { code:'4110011', name:'تأجير خيام - الرياض', group:'الإيرادات / تأجير خيام', type:'income' },
+  { code:'4110012', name:'تأجير خيام - المدينة', group:'الإيرادات / تأجير خيام', type:'income' },
+  { code:'4110013', name:'تأجير خيام - القصيم', group:'الإيرادات / تأجير خيام', type:'income' },
+  { code:'4210011', name:'حسميات الموظفين', group:'الإيرادات / إيرادات أخرى', type:'income' },
+  { code:'4210012', name:'إيرادات أخرى', group:'الإيرادات / إيرادات أخرى', type:'income' },
+  { code:'5110011', name:'تأمين سيارات', group:'المصروفات / مصروفات السيارات', type:'expense' },
+  { code:'5110012', name:'صيانة سيارات', group:'المصروفات / مصروفات السيارات', type:'expense' },
+  { code:'5110013', name:'مخالفات مرور', group:'المصروفات / مصروفات السيارات', type:'expense' },
+  { code:'5110014', name:'محروقات', group:'المصروفات / مصروفات السيارات', type:'expense' },
+  { code:'5110021', name:'عدد مستهلكة', group:'المصروفات / مستلزمات الخيام', type:'expense', correctedParent:'511002' },
+  { code:'5110022', name:'فريون للمكيفات', group:'المصروفات / مستلزمات الخيام', type:'expense', correctedParent:'511002' },
+  { code:'5110023', name:'إعاشة العمال', group:'المصروفات / مستلزمات الخيام', type:'expense', correctedParent:'511002' },
+  { code:'5110024', name:'الرواتب والإضافات', group:'المصروفات / مستلزمات الخيام', type:'expense', correctedFrom:'5110023', correctedParent:'511002' },
+  { code:'5210011', name:'الاشتراكات الحكومية', group:'المصروفات العمومية / حكومية', type:'expense' },
+  { code:'5210012', name:'التأمينات الاجتماعية', group:'المصروفات العمومية / حكومية', type:'expense' },
+  { code:'5210013', name:'تعقيب وجوازات', group:'المصروفات العمومية / حكومية', type:'expense' },
+  { code:'5210021', name:'أخرى', group:'المصروفات العمومية / أخرى', type:'expense' },
+  { code:'5210022', name:'سفر وانتقالات', group:'المصروفات العمومية / أخرى', type:'expense' },
+  { code:'5210023', name:'عمولات بنكية', group:'المصروفات العمومية / أخرى', type:'expense' },
+  { code:'5210024', name:'حوافز', group:'المصروفات العمومية / أخرى', type:'expense' },
+];
+const accountingLabel = account => `${account.code} - ${account.name}`;
+const chartAccountsForType = type => {
+  if (type === 'إيراد') return ACCOUNTING_CHART.filter(a => a.type === 'income');
+  if (type === 'عهدة') return ACCOUNTING_CHART.filter(a => a.code === '1210041' || a.type === 'expense');
+  if (type === 'سلفة') return ACCOUNTING_CHART.filter(a => a.group.includes('سلف الموظفين'));
+  if (type === 'دين') return ACCOUNTING_CHART.filter(a => a.type === 'liability');
+  if (type === 'تحويل') return ACCOUNTING_CHART.filter(a => a.type === 'asset');
+  return ACCOUNTING_CHART.filter(a => a.type === 'expense' || a.type === 'tax');
+};
+const accountingOptions = (type = 'مصروف') => chartAccountsForType(type)
+  .map(a => `<option value="${htmlEscape(accountingLabel(a))}">${a.code} — ${htmlEscape(a.name)} (${htmlEscape(a.group)})</option>`)
+  .join('');
 const normalizeBankAccounts = () => {
   if (!Array.isArray(bankAccounts) || !bankAccounts.length) bankAccounts = defaultBankAccounts();
   const seen = new Set();
@@ -1760,7 +1876,7 @@ async function setQuoteConfirmed(id, confirmed) {
         account,
         person: c.name || '',
         note: 'دفعة تأكيد عرض السعر: ' + (c.name || '') + (c.daftraNo ? ' #' + c.daftraNo : '') + ' ' + refs.join(' '),
-        category: 'إيراد تأجير',
+        category: '4110011 - تأجير خيام - الرياض',
         attachment: '',
         created: new Date().toISOString(),
         createdBy: currentUser?.name || 'مدخل',
@@ -1948,6 +2064,7 @@ function openQuickEntry(type) {
   refreshFinanceAccountSelects();
   document.getElementById('quick-entry').style.display = 'flex';
   if (type) document.getElementById('q-type').value = type;
+  refreshAccountingCategorySelects(type || document.getElementById('q-type')?.value || 'مصروف');
   setTimeout(() => document.getElementById('q-amount')?.focus(), 50);
 }
 
@@ -2034,14 +2151,22 @@ function inferWhatsappPerson(text) {
 }
 
 function inferWhatsappCategory(text) {
-  const t = text.toLowerCase();
-  if (/بنزين|ديزل|زيت|سيارة|سياره|صيانة|صيانه/.test(t)) return 'سيارات';
-  if (/عامل|عمال|راتب|اجرة|أجرة|يومية|يوميه/.test(t)) return 'عمالة';
-  if (/تركيب|فك|موقع|خيمة|خيمه|خيام/.test(t)) return 'تركيب';
-  if (/حديد|خشب|قماش|مواد|شراء|توريد/.test(t)) return 'مواد';
-  if (/اعلان|إعلان|قوقل|تسويق/.test(t)) return 'تسويق';
-  if (/مكتب|رسوم|اشتراك|إدارة|ادارة/.test(t)) return 'إدارة';
-  return 'أخرى';
+  const t = normalizeArabicDigits(text).toLowerCase();
+  if (/فريون|مكيف/.test(t)) return '5110022 - فريون للمكيفات';
+  if (/بنزين|ديزل|محروقات|وقود/.test(t)) return '5110014 - محروقات';
+  if (/زيت|صيانة|صيانه|ورشة|ورشه/.test(t)) return '5110012 - صيانة سيارات';
+  if (/مخالفة|مخالفات|مرور/.test(t)) return '5110013 - مخالفات مرور';
+  if (/تأمين|تامين/.test(t)) return '5110011 - تأمين سيارات';
+  if (/راتب|رواتب|اضافات|إضافات/.test(t)) return '5110024 - الرواتب والإضافات';
+  if (/اعاشة|إعاشة|اكل|أكل|غداء|عشاء/.test(t)) return '5110023 - إعاشة العمال';
+  if (/عامل|عمال|اجرة|أجرة|يومية|يوميه/.test(t)) return '5110024 - الرواتب والإضافات';
+  if (/تركيب|فك|موقع|خيمة|خيمه|خيام|عدة|عدد/.test(t)) return '5110021 - عدد مستهلكة';
+  if (/جواز|جوازات|تعقيب/.test(t)) return '5210013 - تعقيب وجوازات';
+  if (/اشتراك|منصة|رخصة|رسوم حكومية/.test(t)) return '5210011 - الاشتراكات الحكومية';
+  if (/تأمينات|تامينات/.test(t)) return '5210012 - التأمينات الاجتماعية';
+  if (/بنك|عمولة|عمولات/.test(t)) return '5210023 - عمولات بنكية';
+  if (/سفر|انتقال|انتقالات/.test(t)) return '5210022 - سفر وانتقالات';
+  return '5210021 - أخرى';
 }
 
 function inferWhatsappAmount(text) {
@@ -2174,7 +2299,7 @@ async function recordClientReceipt(clientId) {
     account,
     person: client.name || '',
     note: 'دفعة مستلمة على عرض/فاتورة: ' + (client.name || '') + (client.daftraNo ? ' #' + client.daftraNo : '') + ' ' + refs.join(' '),
-    category: 'إيراد تأجير',
+    category: '4110011 - تأجير خيام - الرياض',
     attachment: '',
     created: new Date().toISOString(),
     createdBy: currentUser?.name || 'مدخل',
@@ -2647,6 +2772,14 @@ function renderReports() {
   const custodyIssued = approved.filter(e => e.type === 'عهدة');
   const custodyClosed = custodyIssued.filter(e => custodyRemaining(e) <= 0);
   const custodyRemainingTotal = custodyIssued.reduce((sum, e) => sum + custodyRemaining(e), 0);
+  const byAccountingAccount = Object.values(approved.reduce((acc, e) => {
+    const key = e.category || 'غير مصنف';
+    if (!acc[key]) acc[key] = { label: key, count: 0, income: 0, out: 0 };
+    acc[key].count += 1;
+    if (e.type === 'إيراد') acc[key].income += moneyValue(e.amount);
+    if (['مصروف','عهدة','سلفة','تحويل'].includes(e.type)) acc[key].out += moneyValue(e.amount);
+    return acc;
+  }, {})).sort((a,b)=>(b.income + b.out) - (a.income + a.out));
   const rows = [
     ['الحركات المالية المعتمدة', approved.length],
     ['حركات بانتظار الاعتماد', drafts.length],
@@ -2684,6 +2817,16 @@ function renderReports() {
           ${statusPill(custodyRemaining(e) <= 0 ? 'مغلقة' : 'مفتوحة', custodyRemaining(e) <= 0 ? '#5DCAA5' : '#E24B4A')}
         </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد عهد في الفترة</div>'}
       </div>
+    </div>
+    <div class="section" style="margin-top:12px">
+      <div style="font-size:14px;font-weight:700;margin-bottom:8px">ملخص حسب الحساب المحاسبي</div>
+      ${byAccountingAccount.slice(0, 12).map(a => `<div class="list-row" style="padding:8px 0">
+        <div><div style="font-weight:700">${htmlEscape(a.label)}</div><div class="text-secondary" style="margin-top:3px">${a.count} حركة</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${a.income ? statusPill('إيراد ' + money(a.income), '#5DCAA5') : ''}
+          ${a.out ? statusPill('صرف ' + money(a.out), '#E24B4A') : ''}
+        </div>
+      </div>`).join('') || '<div class="text-secondary" style="font-size:12px">لا توجد حسابات محاسبية في الفترة</div>'}
     </div>`;
 }
 
@@ -2706,6 +2849,7 @@ function custodyClosed(entry) {
 function addCustodySpend(entryId) {
   const entry = financeEntries.find(e => e.id === entryId);
   if (!entry) return;
+  refreshAccountingCategorySelects('مصروف');
   document.getElementById('custody-spend-entry-id').value = entryId;
   document.getElementById('custody-spend-subtitle').textContent = (entry.person || 'بدون مستلم') + ' — المتبقي: ' + money(custodyRemaining(entry));
   ['custody-spend-amount','custody-spend-note','custody-spend-file'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -3109,7 +3253,7 @@ async function createFinanceFromBank(index) {
     account: 'الحساب الرسمي',
     person: '',
     note: 'من كشف البنك: ' + (row.description || 'بدون بيان'),
-    category: 'أخرى',
+    category: type === 'إيراد' ? '4110011 - تأجير خيام - الرياض' : '5210021 - أخرى',
     attachment: bankStatementMeta?.fileName || '',
     created: createdDate + 'T12:00:00.000Z',
     createdBy: currentUser?.name || 'المحاسب الذكي',
@@ -3198,6 +3342,7 @@ function renderExecutive() {
 
 function renderFinance() {
   normalizeBankAccounts();
+  refreshAccountingCategorySelects();
   const approved = approvedFinanceEntries();
   const drafts = draftFinanceEntries();
   const sum = financeTotals(approved);
@@ -3212,6 +3357,7 @@ function renderFinance() {
     ['عهد مفتوحة', money(openCustody), 'info'],
   ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:18px;font-weight:700;color:${t==='success'?'#5DCAA5':t==='warning'?'#FAC775':t==='danger'?'#E24B4A':'#85B7EB'}">${v}</div></div>`).join('');
   renderBankAccounts();
+  renderAccountingGuide();
   const list = document.getElementById('finance-list');
   if (list) list.innerHTML = `
     ${renderMonthlyFinanceTables()}
