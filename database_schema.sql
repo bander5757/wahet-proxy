@@ -92,10 +92,11 @@ create table if not exists app_settings (
 
 create table if not exists chart_accounts (
   id uuid primary key default gen_random_uuid(),
-  code text not null unique,
+  code text not null,
   name_ar text not null,
   level integer not null check (level between 1 and 5),
-  parent_code text references chart_accounts(code),
+  parent_code text,
+  original_row_number integer,
   account_type text not null check (account_type in ('asset', 'liability', 'equity', 'revenue', 'expense')),
   normal_balance text not null check (normal_balance in ('debit', 'credit')),
   is_postable boolean not null default false,
@@ -119,6 +120,7 @@ create table if not exists finance_entries (
   related_user_id uuid references app_users(id),
   related_customer_id uuid references customers(id),
   related_quote_id uuid references rental_quotes(id),
+  chart_account_id uuid references chart_accounts(id),
   category text,
   statement text not null,
   status text not null default 'draft' check (status in ('draft', 'approved', 'rejected')),
@@ -213,6 +215,8 @@ create index if not exists idx_rental_quotes_install_date on rental_quotes(insta
 create index if not exists idx_daftra_quote_states_local_key on daftra_quote_states(local_key);
 create index if not exists idx_chart_accounts_parent_code on chart_accounts(parent_code);
 create index if not exists idx_chart_accounts_postable_active on chart_accounts(is_postable, is_active);
+create index if not exists idx_chart_accounts_code on chart_accounts(code);
+create index if not exists idx_finance_entries_chart_account_id on finance_entries(chart_account_id);
 create index if not exists idx_finance_entries_entry_date on finance_entries(entry_date);
 create index if not exists idx_staff_documents_expires_on on staff_documents(expires_on);
 create index if not exists idx_vehicle_tasks_due_on on vehicle_tasks(due_on);

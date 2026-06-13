@@ -949,6 +949,20 @@ function renderAccountingGuide() {
   Object.values(children).forEach(rows => rows.sort((a,b)=>String(a.code).localeCompare(String(b.code))));
   const typeLabel = { asset:'أصل', liability:'خصم', equity:'حقوق ملكية', revenue:'إيراد', expense:'مصروف' };
   const balanceLabel = { debit:'مدين', credit:'دائن' };
+  const duplicateGroups = Object.entries(chartAccounts.reduce((acc, a) => {
+    if (!acc[a.code]) acc[a.code] = [];
+    acc[a.code].push(a);
+    return acc;
+  }, {})).filter(([, rows]) => rows.length > 1);
+  const duplicateWarning = duplicateGroups.length ? `
+    <div style="background:#2d2208;border:0.5px solid #FAC77577;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:800;color:#FAC775;margin-bottom:6px">يوجد أكثر من حساب بنفس الكود. سيتم التمييز بينها داخلياً بالمعرف ID، لكن يجب مراجعة الاستخدام المحاسبي قبل الترحيل.</div>
+      ${duplicateGroups.map(([code, rows]) => `
+        <div style="font-size:12px;margin-top:6px">
+          <div style="font-weight:800">${htmlEscape(code)}</div>
+          ${rows.map(a => `<div class="text-secondary" style="line-height:1.7">${htmlEscape(a.name_ar)} — المستوى ${a.level} — الأب: ${htmlEscape(a.parent_code || '—')} — ${htmlEscape(a.full_path || a.name_ar || '')}</div>`).join('')}
+        </div>`).join('')}
+    </div>` : '';
   const renderNode = (a, depth = 0) => {
     const kids = children[a.code] || [];
     const hasKids = kids.length > 0;
@@ -968,7 +982,7 @@ function renderAccountingGuide() {
       ${kids.map(child => renderNode(child, depth + 1)).join('')}
     </details>`;
   };
-  el.innerHTML = (children[''] || []).map(root => renderNode(root)).join('');
+  el.innerHTML = duplicateWarning + (children[''] || []).map(root => renderNode(root)).join('');
 }
 
 function accountBalance(accountName) {
@@ -1134,9 +1148,15 @@ const defaultBankAccounts = () => [
   { id: 'acc_cash', name: 'كاش', openingBalance: 0 }
 ];
 const accountingLabel = account => `${account.code} - ${account.name_ar || account.name || ""}`;
+const accountingOptionLabel = account => `${account.code} ${account.name_ar || account.name || ""}${account.full_path ? " — " + account.full_path : ""}`;
+const chartAccountById = id => chartAccounts.find(account => account.id === id);
 const postableChartAccounts = () => chartAccounts.filter(a => a.is_active && a.is_postable);
 const firstPostableAccount = predicate => postableChartAccounts().find(predicate);
-const accountValue = account => account ? accountingLabel(account) : '';
+const accountValue = account => account ? account.id : '';
+const accountDisplay = accountId => {
+  const account = chartAccountById(accountId);
+  return account ? accountingOptionLabel(account) : '';
+};
 const defaultRevenueCategory = () => accountValue(firstPostableAccount(a => a.account_type === 'revenue'));
 const defaultExpenseCategory = () => accountValue(firstPostableAccount(a => a.account_type === 'expense'));
 const chartAccountMatches = (account, patterns) => {
@@ -1145,7 +1165,7 @@ const chartAccountMatches = (account, patterns) => {
 };
 const categoryByKeywords = (patterns, fallbackType = 'expense') => {
   const found = postableChartAccounts().find(account => chartAccountMatches(account, patterns));
-  if (found) return accountingLabel(found);
+  if (found) return accountValue(found);
   return fallbackType === 'revenue' ? defaultRevenueCategory() : defaultExpenseCategory();
 };
 const requirePostableCategory = (category, message) => {
@@ -1164,7 +1184,7 @@ const chartAccountsForType = type => {
 const accountingOptions = (type = "مصروف") => {
   const rows = chartAccountsForType(type);
   if (!rows.length) return "<option value=\"\">لا يوجد دليل محاسبي مستورد</option>";
-  return rows.map(a => `<option value=\"${htmlEscape(accountingLabel(a))}\">${htmlEscape(a.code)} — ${htmlEscape(a.name_ar || a.name || "")}</option>`).join("");
+  return rows.map(a => `<option value=\"${htmlEscape(a.id)}\">${htmlEscape(accountingOptionLabel(a))}</option>`).join("");
 };
 const normalizeBankAccounts = () => {
   if (!Array.isArray(bankAccounts) || !bankAccounts.length) bankAccounts = defaultBankAccounts();
@@ -1215,7 +1235,7 @@ async function apiRequest(path, options = {}) {
   if (!res.ok || data.ok === false) throw new Error(data.error || 'فشل الاتصال بقاعدة البيانات');
   return data;
 }
-const isChartAccountError = error => /الحساب المحاسبي|الترحيل|الدليل المعتمد|رئيسي ولا يمكن الترحيل/.test(error?.message || '');
+const isChartAccountError = error => /الحساب المحاسبي|الترحيل|الدليل المعتمد|رئيسي ولا يمكن الترحيل|كود مكرر/.test(error?.message || '');
 
 async function loadAppData() {
   const dbStatus = document.getElementById('db-status');
@@ -1853,8 +1873,9 @@ async function setQuoteConfirmed(id, confirmed) {
   if (confirmed) {
     const received = Number(prompt('هل تم استلام دفعة الآن؟ اكتب المبلغ أو اتركها 0', '0') || 0) || 0;
     if (received > 0) {
-      const category = defaultRevenueCategory();
-      if (!requirePostableCategory(category, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+      const chartAccountId = defaultRevenueCategory();
+      if (!requirePostableCategory(chartAccountId, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+      const category = accountDisplay(chartAccountId);
       normalizeBankAccounts();
       const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
       const selected = Number(prompt('اختر رقم الحساب الذي وصل له الإيراد:\n' + accountNames, '1') || 1) - 1;
@@ -1868,6 +1889,7 @@ async function setQuoteConfirmed(id, confirmed) {
         account,
         person: c.name || '',
         note: 'دفعة تأكيد عرض السعر: ' + (c.name || '') + (c.daftraNo ? ' #' + c.daftraNo : '') + ' ' + refs.join(' '),
+        chartAccountId,
         category,
         attachment: '',
         created: new Date().toISOString(),
@@ -2068,16 +2090,18 @@ async function saveQuickEntry() {
   const amount = parseFloat(document.getElementById('q-amount').value) || 0;
   const type = document.getElementById('q-type').value;
   const account = document.getElementById('q-account').value;
-  const category = document.getElementById('q-category').value;
+  const chartAccountId = document.getElementById('q-category').value;
+  const category = accountDisplay(chartAccountId);
   const person = document.getElementById('q-person').value.trim();
   const note = document.getElementById('q-note').value.trim();
   const file = document.getElementById('q-file').files[0];
   if (!amount) { alert('أدخل المبلغ'); return; }
   if (!note) { alert('أدخل البيان'); return; }
-  if (!category) { alert('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  if (!chartAccountId) { alert('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
   const entry = {
     id: 'fin_' + Date.now(),
     type, amount, account, person, note,
+    chartAccountId,
     category,
     attachment: file ? file.name : '',
     created: new Date().toISOString(),
@@ -2188,12 +2212,14 @@ function parseWhatsappFinanceText(rawText) {
   const amount = inferWhatsappAmount(text);
   const account = document.getElementById('wa-entry-account')?.value || 'الحساب الرسمي';
   const selectedCategory = document.getElementById('wa-entry-category')?.value || '';
+  const chartAccountId = selectedCategory || inferWhatsappCategory(text);
   return {
     type: inferWhatsappType(text),
     amount,
     account,
     person: inferWhatsappPerson(text),
-    category: selectedCategory || inferWhatsappCategory(text),
+    chartAccountId,
+    category: accountDisplay(chartAccountId),
     note: text,
     attachment: document.getElementById('wa-audio-file')?.files?.[0]?.name || '',
     created: new Date().toISOString(),
@@ -2229,7 +2255,7 @@ async function saveWhatsappDraft() {
   const entry = previewWhatsappEntry();
   if (!entry) return;
   if (!entry.amount) { showMsg('أدخل مبلغ واضح في الرسالة قبل إنشاء المسودة'); return; }
-  if (!entry.category) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  if (!entry.chartAccountId) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
   const savedEntry = { ...entry, id: 'fin_wa_' + Date.now() };
   let savedRemote = false;
   if (apiOnline) {
@@ -2295,8 +2321,9 @@ async function recordClientReceipt(clientId) {
   const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
   const selected = Number(prompt('اختر رقم الحساب:\n' + accountNames, '1') || 1) - 1;
   const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
-  const category = defaultRevenueCategory();
-  if (!requirePostableCategory(category, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+  const chartAccountId = defaultRevenueCategory();
+  if (!requirePostableCategory(chartAccountId, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+  const category = accountDisplay(chartAccountId);
   const refs = [clientRefToken(client.id)];
   if (client.daftraEstId) refs.push(clientRefToken('est_' + client.daftraEstId));
   if (client.daftraInvId) refs.push(clientRefToken('inv_' + client.daftraInvId));
@@ -2307,6 +2334,7 @@ async function recordClientReceipt(clientId) {
     account,
     person: client.name || '',
     note: 'دفعة مستلمة على عرض/فاتورة: ' + (client.name || '') + (client.daftraNo ? ' #' + client.daftraNo : '') + ' ' + refs.join(' '),
+    chartAccountId,
     category,
     attachment: '',
     created: new Date().toISOString(),
@@ -2875,15 +2903,17 @@ async function saveCustodySpend() {
   if (!entry) return;
   const amount = Number(document.getElementById('custody-spend-amount')?.value || 0) || 0;
   const note = (document.getElementById('custody-spend-note')?.value || '').trim();
-  const category = document.getElementById('custody-spend-category')?.value || '';
+  const chartAccountId = document.getElementById('custody-spend-category')?.value || '';
+  const category = accountDisplay(chartAccountId);
   const file = document.getElementById('custody-spend-file')?.files?.[0];
   if (!amount) { showMsg('أدخل مبلغ الصرف'); return; }
   if (!note) { showMsg('أدخل شرح الصرف'); return; }
-  if (!category) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
+  if (!chartAccountId) { showMsg('اختر حساباً محاسبياً قابلاً للترحيل من الدليل المعتمد'); return; }
   if (amount > custodyRemaining(entry)) { showMsg('مبلغ الصرف أكبر من المتبقي في العهدة'); return; }
   custodySpends[entryId] = custodySpendLines(entryId).concat([{
     id: 'spend_' + Date.now(),
     amount,
+    chartAccountId,
     category,
     note,
     attachment: file ? file.name : '',
@@ -3254,8 +3284,9 @@ async function createFinanceFromBank(index) {
   const amount = Math.abs(Number(row.amount) || 0);
   if (!amount) { showMsg('⚠️ لا يمكن إنشاء قيد بدون مبلغ'); return; }
   const type = row.amount >= 0 ? 'إيراد' : 'مصروف';
-  const category = type === 'إيراد' ? defaultRevenueCategory() : defaultExpenseCategory();
-  if (!requirePostableCategory(category, 'لا يوجد حساب ' + (type === 'إيراد' ? 'إيراد' : 'مصروف') + ' قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+  const chartAccountId = type === 'إيراد' ? defaultRevenueCategory() : defaultExpenseCategory();
+  if (!requirePostableCategory(chartAccountId, 'لا يوجد حساب ' + (type === 'إيراد' ? 'إيراد' : 'مصروف') + ' قابل للترحيل في الدليل المحاسبي المعتمد')) return;
+  const category = accountDisplay(chartAccountId);
   const createdDate = dateOnly(row.date) || localDateString(new Date());
   const entry = {
     id: 'fin_bank_' + Date.now(),
@@ -3264,6 +3295,7 @@ async function createFinanceFromBank(index) {
     account: 'الحساب الرسمي',
     person: '',
     note: 'من كشف البنك: ' + (row.description || 'بدون بيان'),
+    chartAccountId,
     category,
     attachment: bankStatementMeta?.fileName || '',
     created: createdDate + 'T12:00:00.000Z',

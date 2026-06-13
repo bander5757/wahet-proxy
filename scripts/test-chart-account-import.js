@@ -1,97 +1,68 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 
-const ACCOUNT_TYPE_BY_ROOT = {
-  "1": "asset",
-  "2": "liability",
-  "3": "equity",
-  "4": "revenue",
-  "5": "expense",
-};
-
-const NORMAL_BALANCE_BY_TYPE = {
-  asset: "debit",
-  expense: "debit",
-  liability: "credit",
-  equity: "credit",
-  revenue: "credit",
-};
-
-const EXPECTED_CODE_LENGTH_BY_LEVEL = { 1: 1, 2: 2, 3: 3, 4: 6, 5: 7 };
-
-function expectedParentCode(code, level) {
-  if (level <= 1) return "";
-  if (level === 2) return code.slice(0, 1);
-  if (level === 3) return code.slice(0, 2);
-  if (level === 4) return code.slice(0, 3);
-  if (level === 5) return code.slice(0, 6);
-  return "";
+function duplicateWarnings(accounts) {
+  const grouped = accounts.reduce((acc, account) => {
+    if (!acc[account.code]) acc[account.code] = [];
+    acc[account.code].push(account);
+    return acc;
+  }, {});
+  return Object.entries(grouped)
+    .filter(([, rows]) => rows.length > 1)
+    .map(([code, rows]) => ({
+      code,
+      accounts: rows.map(account => ({
+        id: account.id,
+        code: account.code,
+        name_ar: account.name_ar,
+        parent_code: account.parent_code,
+        level: account.level,
+        full_path: account.full_path,
+      })),
+    }));
 }
 
-function normalizeAccount(account) {
-  const code = String(account.code || "").trim();
-  const level = Number(account.level);
-  const accountType = ACCOUNT_TYPE_BY_ROOT[code[0]];
-  return {
-    code,
-    name_ar: String(account.name_ar || "").trim(),
-    level,
-    parent_code: level === 1 ? "" : String(account.parent_code || expectedParentCode(code, level)).trim(),
-    account_type: accountType,
-    normal_balance: NORMAL_BALANCE_BY_TYPE[accountType],
-    is_postable: level === 5,
-    is_active: true,
-  };
-}
-
-function validateChartAccounts(accounts, expectedCount) {
-  const normalized = accounts.map(normalizeAccount);
-  const codes = new Set();
-  for (const account of normalized) {
+function validateImportedChart(accounts) {
+  for (const account of accounts) {
+    assert.ok(account.id, `missing internal id: ${account.code} ${account.name_ar}`);
     assert.match(account.code, /^\d+$/, `invalid code: ${account.code}`);
-    assert.equal(account.code.length, EXPECTED_CODE_LENGTH_BY_LEVEL[account.level], `bad level/code length: ${account.code}`);
-    assert.ok(account.name_ar, `missing account name: ${account.code}`);
-    assert.ok(account.account_type, `missing account type: ${account.code}`);
-    assert.ok(!codes.has(account.code), `duplicate account code: ${account.code}`);
-    codes.add(account.code);
+    assert.ok(account.name_ar, `missing account name: ${account.id}`);
+    assert.ok(account.level >= 1 && account.level <= 5, `invalid level: ${account.code}`);
+    assert.equal(account.is_postable, account.level === 5, `postable must follow current final level only: ${account.code}`);
   }
-  for (const account of normalized) {
-    if (account.level > 1) {
-      assert.equal(account.parent_code, expectedParentCode(account.code, account.level), `bad parent by code: ${account.code}`);
-      assert.ok(codes.has(account.parent_code), `missing parent: ${account.code} -> ${account.parent_code}`);
-    }
-    assert.equal(account.is_postable, account.level === 5, `bad postable flag: ${account.code}`);
-  }
-  assert.equal(normalized.length, expectedCount, "corrected chart account count changed");
-  return normalized;
+  return duplicateWarnings(accounts);
 }
 
-const correctedRegressionAccounts = [
-  { code: "2", name_ar: "الخصوم", level: 1 },
-  { code: "22", name_ar: "طويلة الاجل", level: 2 },
-  { code: "221", name_ar: "القروض", level: 3 },
-  { code: "221001", name_ar: "البنوك", level: 4 },
-  { code: "221002", name_ar: "شركات التمويل", level: 4 },
-  { code: "2210011", name_ar: "الراجحي", level: 5 },
-  { code: "2210012", name_ar: "تساهيل", level: 5 },
-  { code: "2210021", name_ar: "تساهيل", level: 5 },
-  { code: "5", name_ar: "المصروفات", level: 1 },
-  { code: "51", name_ar: "مصروفات تشغيلية", level: 2 },
-  { code: "511", name_ar: "مصروفات التاجير", level: 3 },
-  { code: "511001", name_ar: "مصروفات السيارات", level: 4 },
-  { code: "511002", name_ar: "مستلزمات الخيام", level: 4 },
-  { code: "5110011", name_ar: "تامين", level: 5 },
-  { code: "5110012", name_ar: "صيانة", level: 5 },
-  { code: "5110013", name_ar: "مخالفات مرور", level: 5 },
-  { code: "5110014", name_ar: "محروقات", level: 5 },
-  { code: "5110021", name_ar: "عدد مستهلكة", level: 5 },
-  { code: "5110022", name_ar: "فريون للمكيفات", level: 5 },
-  { code: "5110023", name_ar: "اعاشة العمال", level: 5 },
-  { code: "5110024", name_ar: "الرواتب والاضافات", level: 5 },
+const accountantChartAsWritten = [
+  { id: "a1", code: "5", name_ar: "المصروفات", level: 1, parent_code: "", full_path: "المصروفات", is_postable: false },
+  { id: "a2", code: "51", name_ar: "مصروفات تشغيلية", level: 2, parent_code: "5", full_path: "المصروفات > مصروفات تشغيلية", is_postable: false },
+  { id: "a3", code: "511", name_ar: "مصروفات التاجير", level: 3, parent_code: "51", full_path: "المصروفات > مصروفات تشغيلية > مصروفات التاجير", is_postable: false },
+  { id: "a4", code: "511001", name_ar: "مصروفات السيارات", level: 4, parent_code: "511", full_path: "المصروفات > مصروفات تشغيلية > مصروفات التاجير > مصروفات السيارات", is_postable: false },
+  { id: "a5", code: "511001", name_ar: "مستلزمات الخيام", level: 4, parent_code: "511", full_path: "المصروفات > مصروفات تشغيلية > مصروفات التاجير > مستلزمات الخيام", is_postable: false },
+  { id: "a6", code: "5110023", name_ar: "اعاشة العمال", level: 5, parent_code: "511001", full_path: "المصروفات > مصروفات تشغيلية > مصروفات التاجير > مستلزمات الخيام > اعاشة العمال", is_postable: true },
+  { id: "a7", code: "5110023", name_ar: "الرواتب والاضافات", level: 5, parent_code: "511001", full_path: "المصروفات > مصروفات تشغيلية > مصروفات التاجير > مستلزمات الخيام > الرواتب والاضافات", is_postable: true },
+  { id: "b1", code: "2", name_ar: "الخصوم", level: 1, parent_code: "", full_path: "الخصوم", is_postable: false },
+  { id: "b2", code: "22", name_ar: "طويلة الاجل", level: 2, parent_code: "2", full_path: "الخصوم > طويلة الاجل", is_postable: false },
+  { id: "b3", code: "221", name_ar: "القروض", level: 3, parent_code: "22", full_path: "الخصوم > طويلة الاجل > القروض", is_postable: false },
+  { id: "b4", code: "221001", name_ar: "البنوك", level: 4, parent_code: "221", full_path: "الخصوم > طويلة الاجل > القروض > البنوك", is_postable: false },
+  { id: "b5", code: "2210012", name_ar: "تساهيل", level: 5, parent_code: "221001", full_path: "الخصوم > طويلة الاجل > القروض > البنوك > تساهيل", is_postable: true },
 ];
 
-const normalized = validateChartAccounts(correctedRegressionAccounts, 21);
-for (const requiredCode of ["2210012", "2210021", "511002", "5110023", "5110024"]) {
-  assert.ok(normalized.some(account => account.code === requiredCode), `missing corrected regression account: ${requiredCode}`);
-}
+const warnings = validateImportedChart(accountantChartAsWritten);
+assert.ok(warnings.some(group => group.code === "511001" && group.accounts.length === 2), "duplicate 511001 must be warning, not error");
+assert.ok(warnings.some(group => group.code === "5110023" && group.accounts.length === 2), "duplicate 5110023 must be warning, not error");
+
+const tentSupplies = accountantChartAsWritten.find(account => account.name_ar === "مستلزمات الخيام");
+const payroll = accountantChartAsWritten.find(account => account.name_ar === "الرواتب والاضافات");
+const tasheel = accountantChartAsWritten.find(account => account.name_ar === "تساهيل");
+assert.equal(tentSupplies.code, "511001");
+assert.equal(payroll.code, "5110023");
+assert.equal(tasheel.code, "2210012");
+assert.ok(!accountantChartAsWritten.some(account => account.code === "2210021"), "2210021 must not be generated unless present in accountant file");
+
+const apiSource = fs.readFileSync("api/app.js", "utf8");
+assert.match(apiSource, /chart_account_id/, "finance entries must store chart_account_id");
+assert.match(apiSource, /validatePostableChartAccount\(client, payload\.chartAccountId\)/, "finance creation must validate by internal account id");
+assert.doesNotMatch(apiSource, /where code = \$1[\s\S]{0,120}\[code\]/, "finance validation must not select chart account by code");
 
 console.log("chart account import regression ok");
