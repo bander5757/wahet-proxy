@@ -341,6 +341,7 @@
   <button class="tab-btn" onclick="setTab('assets')">الموظفين والسيارات</button>
   <button class="tab-btn" onclick="setTab('tenders')">المنافسات</button>
   <button class="tab-btn" onclick="setTab('reports')">التقارير</button>
+  <button class="tab-btn bander-only" onclick="setTab('notifadmin')" style="display:none">🔔 الحسابات والتنبيهات</button>
 </div>
 
 <div class="side-menu-overlay" id="side-menu-overlay" onclick="closeSideMenu()"></div>
@@ -360,6 +361,7 @@
     <button onclick="setTab('assets')"><span>🔔</span><span>الموظفين والسيارات</span></button>
     <button onclick="setTab('tenders')"><span>🎯</span><span>المنافسات</span></button>
     <button onclick="setTab('reports')"><span>📊</span><span>التقارير</span></button>
+    <button class="bander-only" onclick="setTab('notifadmin')" style="display:none"><span>📧</span><span>الحسابات والتنبيهات</span></button>
   </div>
 </aside>
 
@@ -389,7 +391,10 @@
 
 <div id="tab-home" class="tab-page active">
   <div id="executive-dashboard"></div>
-  <div id="notifications-admin" style="display:none;margin-top:16px"></div>
+</div>
+
+<div id="tab-notifadmin" class="tab-page">
+  <div id="notifadmin-content"></div>
 </div>
 
 <div id="tab-clients" class="tab-page">
@@ -1818,6 +1823,13 @@ function applyPermissions() {
   });
   const settingsPanel = document.getElementById('settings-panel');
   if (settingsPanel && !can('settings')) settingsPanel.style.display = 'none';
+  /* بندر فقط — تبويب الحسابات والتنبيهات */
+  const bander = isBander();
+  document.querySelectorAll('.bander-only').forEach(el => {
+    el.style.display = bander ? '' : 'none';
+  });
+  /* لو المستخدم الحالي ليس بندر وكان في تبويب notifadmin، أعده للرئيسية */
+  if (!bander && activeTab === 'notifadmin') setTab('home');
 }
 function openLogin() {
   document.getElementById('login-modal').style.display = 'flex';
@@ -4965,7 +4977,7 @@ function render() {
   safe('التركيبات', renderOperations, 'install-list');
   safe('الموظفين والمنافسات', renderAssetsAndTenders, 'tender-list');
   safe('التقارير', renderReports, 'reports-view');
-  safe('إدارة التنبيهات', renderNotificationsAdmin, 'notifications-admin');
+  safe('إدارة التنبيهات', renderNotificationsAdmin, 'notifadmin-content');
 }
 
 /* ─── Notification prefs (local cache) ─── */
@@ -4991,10 +5003,9 @@ const SYSTEM_USERS = [
 ];
 
 function renderNotificationsAdmin() {
-  const el = document.getElementById('notifications-admin');
+  const el = document.getElementById('notifadmin-content');
   if (!el) return;
-  if (!isBander()) { el.style.display = 'none'; return; }
-  el.style.display = 'block';
+  if (!isBander()) { el.innerHTML = ''; return; }
 
   const userRows = SYSTEM_USERS.map(u => {
     const cfg = _notifPrefs[u.name] || {};
