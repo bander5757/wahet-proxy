@@ -615,6 +615,25 @@
   </div>
 </div>
 
+<div id="not-fit-modal" class="modal-overlay" style="display:none" onclick="closeNotFitModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:400px">
+    <div class="flex-between mb-12">
+      <div style="font-size:15px;font-weight:600">✗ سبب عدم المناسبة</div>
+      <button class="btn-secondary" onclick="closeNotFitModal()" style="padding:4px 10px">✕</button>
+    </div>
+    <div style="font-size:12px;color:#9a9898;margin-bottom:12px">اختر السبب — سيُضاف تلقائياً لقائمة الاستبعاد</div>
+    <div id="not-fit-reasons" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+    <div>
+      <div class="label">سبب إضافي (اختياري)</div>
+      <input id="not-fit-custom" type="text" placeholder="اكتب كلمة أو عبارة تريد استبعادها">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn-primary" onclick="submitNotFit()" style="flex:1">حفظ وتطبيق</button>
+      <button class="btn-secondary" onclick="closeNotFitModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
 <div id="custody-spend-modal" class="modal-overlay" style="display:none" onclick="closeCustodySpendModal()">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="flex-between mb-12">
@@ -708,11 +727,9 @@ try { currentUser = JSON.parse(localStorage.getItem('wk_current_user') || 'null'
 try { authToken = localStorage.getItem('wk_auth_token') || ''; } catch(e) {}
 let loginRequired = true;
 try { loginRequired = localStorage.getItem('wk_login_skipped') !== '1'; } catch(e) {}
-let tenders = [
-  { title: 'تجهيز خيام وفعاليات موسمية', entity: 'جهة حكومية', due: '2026-06-20', score: 'تحتاج مراجعة', url: '#', reason: 'تحتوي على خيام وتجهيز فعاليات' },
-  { title: 'توريد دورات مياه متنقلة للفعاليات', entity: 'شركة فعاليات', due: '2026-06-12', score: 'مناسبة', url: '#', reason: 'مرتبطة بمنتج مساند موجود لديكم' }
-];
+let tenders = [];
 try { tenders = JSON.parse(localStorage.getItem('wk_tenders') || JSON.stringify(tenders)); } catch(e) {}
+try { const extra = JSON.parse(localStorage.getItem('wk_tender_negative_extra') || '[]'); extra.forEach(w => { if (!TENDER_NEGATIVE_KEYWORDS.includes(w)) TENDER_NEGATIVE_KEYWORDS.push(w); }); } catch(e) {}
 const APP_API = '/api/app';
 let apiOnline = false;
 if (!staffDocs.length) {
@@ -1124,6 +1141,23 @@ const isActiveFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSa
 const isOldFollowupQuote = c => c.stage === 'عرض_سعر' && !isConfirmedSale(c) && followupDate(c) && followupDate(c) < FOLLOWUP_START_DATE;
 const TENDER_KEYWORDS = ['خيام أوروبية','خيمة أوروبية','خيم أوروبية','خيام اوروبية','خيمة اوربية','خيم اوربية','تأجير خيام','استئجار خيام','خيام فعاليات','خيم فعاليات','تجهيز خيام','توريد وتركيب خيام','مخيمات فعاليات','ضيافة خيام','مهرجان خارجي','فعالية خارجية','منطقة استقبال','موقع مؤقت','تجهيز فعاليات','مخيم فاخر'];
 const TENDER_NEGATIVE_KEYWORDS = ['خيام رحلات','خيام بر','خيام أطفال','حراج','مستعملة','السنيدي','القاضي','خياط خيام','بيت شعر صغير','أرخص خيام','تفصيل خيام شعر'];
+// كلمات سلبية مشروطة: تُعتبر سلبية فقط إذا اقترنت بكلمات التنفيذ (تفصيل/تركيب/بيع) وليس الإيجار
+const TENDER_CONDITIONAL_NEGATIVE = [
+  { trigger: 'بيت شعر', excludeIf: ['إيجار','ايجار','تأجير','تاجير','استئجار'], reason: 'بيت شعر للتفصيل أو التركيب — ليس إيجاراً' },
+  { trigger: 'خيام شعر', excludeIf: ['إيجار','ايجار','تأجير','تاجير','استئجار'], reason: 'خيام شعر للتفصيل أو التركيب' },
+  { trigger: 'بيوت شعر', excludeIf: ['إيجار','ايجار','تأجير','تاجير','استئجار'], reason: 'بيوت شعر للتفصيل أو التركيب' },
+];
+// أسباب التقرير السلبي — لكل سبب نقترح كلمة سلبية إضافية
+const TENDER_NOT_FIT_REASONS = [
+  { id: 'camping', label: 'خيام بر / رحلات / تخييم', suggest: 'خيام تخييم' },
+  { id: 'tailoring', label: 'تفصيل أو تصنيع خيام (وليس إيجار)', suggest: 'تفصيل خيام' },
+  { id: 'kids', label: 'خيام أطفال أو ألعاب', suggest: 'خيام أطفال' },
+  { id: 'used', label: 'مستعملة أو حراج', suggest: 'مستعملة' },
+  { id: 'hair', label: 'بيت شعر للتركيب / التفصيل', suggest: 'تركيب بيت شعر' },
+  { id: 'competitor', label: 'منافس معروف (السنيدي، القاضي...)', suggest: null },
+  { id: 'outofscope', label: 'خارج السعودية أو خارج النطاق', suggest: null },
+  { id: 'other', label: 'سبب آخر', suggest: null },
+];
 const TENDER_PLATFORMS = [
   { id: 'etimad', name: 'اعتماد', url: 'https://tenders.etimad.sa/Tender', site: 'tenders.etimad.sa', type: 'tender' },
   { id: 'tanafos', name: 'تنافس', url: 'https://tanafos.sa/', site: 'tanafos.sa' },
@@ -2698,10 +2732,22 @@ async function runTenderRadar() {
   }
 }
 
+function tenderIsExpired(t) {
+  if (!t.due) return false;
+  return t.due < new Date().toISOString().slice(0, 10);
+}
+
 function tenderMatchesProduct(t) {
   const text = [t.title, t.reason, t.keyword].filter(Boolean).join(' ').toLowerCase();
-  const negative = TENDER_NEGATIVE_KEYWORDS.some(k => text.includes(k.toLowerCase()));
-  return !negative && TENDER_KEYWORDS.some(k => text.includes(k.toLowerCase()));
+  if (TENDER_NEGATIVE_KEYWORDS.some(k => text.includes(k.toLowerCase()))) return false;
+  // فحص الكلمات المشروطة: سلبية فقط إذا ما فيها كلمة الإيجار
+  for (const rule of TENDER_CONDITIONAL_NEGATIVE) {
+    if (text.includes(rule.trigger.toLowerCase())) {
+      const hasRental = rule.excludeIf.some(w => text.includes(w.toLowerCase()));
+      if (!hasRental) return false;
+    }
+  }
+  return TENDER_KEYWORDS.some(k => text.includes(k.toLowerCase()));
 }
 
 async function setTenderScore(id, score) {
@@ -2725,6 +2771,63 @@ async function setTenderScore(id, score) {
       alert(e.message);
     }
   }
+}
+
+let _notFitTenderId = null;
+let _notFitSelected = new Set();
+
+function openNotFitModal(id) {
+  _notFitTenderId = id;
+  _notFitSelected = new Set();
+  document.getElementById('not-fit-custom').value = '';
+  const box = document.getElementById('not-fit-reasons');
+  box.innerHTML = TENDER_NOT_FIT_REASONS.map(r => `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:7px 10px;border-radius:7px;border:0.5px solid #2e3244;background:#13161f" id="nfr-${r.id}">
+      <input type="checkbox" value="${r.id}" onchange="toggleNotFitReason('${r.id}', this.checked)" style="width:auto;accent-color:#E24B4A">
+      <span style="font-size:12px;color:#e8e6e1">${r.label}</span>
+      ${r.suggest ? `<span style="margin-right:auto;font-size:10px;color:#637083">+ "${r.suggest}"</span>` : ''}
+    </label>`).join('');
+  document.getElementById('not-fit-modal').style.display = 'flex';
+}
+
+function toggleNotFitReason(id, checked) {
+  if (checked) _notFitSelected.add(id);
+  else _notFitSelected.delete(id);
+  const el = document.getElementById('nfr-' + id);
+  if (el) el.style.borderColor = checked ? '#E24B4A' : '#2e3244';
+}
+
+function closeNotFitModal() {
+  document.getElementById('not-fit-modal').style.display = 'none';
+  _notFitTenderId = null;
+}
+
+async function submitNotFit() {
+  if (!_notFitTenderId) return;
+  // جمع الكلمات المقترحة من الأسباب المختارة
+  const newWords = [];
+  _notFitSelected.forEach(id => {
+    const r = TENDER_NOT_FIT_REASONS.find(x => x.id === id);
+    if (r && r.suggest && !TENDER_NEGATIVE_KEYWORDS.includes(r.suggest)) newWords.push(r.suggest);
+  });
+  const custom = document.getElementById('not-fit-custom').value.trim();
+  if (custom && !TENDER_NEGATIVE_KEYWORDS.includes(custom)) newWords.push(custom);
+  // أضف الكلمات الجديدة للقائمة السلبية
+  if (newWords.length) {
+    TENDER_NEGATIVE_KEYWORDS.push(...newWords);
+    try { localStorage.setItem('wk_tender_negative_extra', JSON.stringify(
+      JSON.parse(localStorage.getItem('wk_tender_negative_extra') || '[]').concat(newWords)
+    )); } catch(e) {}
+  }
+  // احفظ التقييم
+  const reasonParts = [..._notFitSelected].map(id => TENDER_NOT_FIT_REASONS.find(x => x.id === id)?.label).filter(Boolean);
+  if (custom) reasonParts.push(custom);
+  await setTenderScore(_notFitTenderId, 'غير مناسبة');
+  const idx = tenders.findIndex(t => t.id === _notFitTenderId);
+  if (idx >= 0) { tenders[idx].reason = 'غير مناسبة: ' + reasonParts.join(' / '); saveTenders(); }
+  closeNotFitModal();
+  render();
+  if (newWords.length) showMsg(`✅ تم إضافة ${newWords.length} كلمة للاستبعاد: ${newWords.join('، ')}`);
 }
 
 async function removeTender(id) {
@@ -3581,32 +3684,40 @@ function renderAssetsAndTenders() {
         ${lastErrors.length ? `<div class="text-secondary" style="font-size:11px;margin-top:8px;color:#EF9F27">تنبيه: تعذر فحص بعض الكلمات مؤقتاً (${lastErrors.length}).</div>` : ''}
       </div>`;
   }
-  if (tender) tender.innerHTML = tenders.map(t => {
-    const color = t.score === 'مناسبة' ? '#5DCAA5' : t.score === 'غير مناسبة' ? '#E24B4A' : '#FAC775';
-    const match = tenderMatchesProduct(t);
-    const linkBtn = t.url && t.url !== '#'
-      ? `<button class="btn-secondary" onclick="window.open('${t.url}')">الرابط</button>`
-      : `<button class="btn-secondary" onclick="showMsg('لا يوجد رابط محفوظ لهذه المنافسة')">الرابط</button>`;
-    return `<div class="list-row">
-      <div>
-        <div style="font-weight:600">${t.title}</div>
-        <div class="text-secondary" style="margin-top:3px">${TENDER_TYPE_LABELS[t.type] || 'منافسة'} — ${t.entity || 'جهة غير محددة'}${t.due ? ' — آخر موعد ' + t.due : ''}${t.platform ? ' — ' + t.platform : ''}</div>
-        ${t.url && t.url !== '#' ? `<div class="text-secondary" style="margin-top:3px">المصدر: ${t.platform || 'رابط خارجي'} — ${t.url}</div>` : ''}
-        ${t.keyword ? `<div class="text-secondary" style="margin-top:3px">الكلمة: ${t.keyword}</div>` : ''}
-        ${t.action ? `<div class="text-secondary" style="margin-top:3px">الإجراء المقترح: ${t.action}</div>` : ''}
-        <div class="text-secondary" style="margin-top:3px">${t.reason || 'بدون سبب تقييم'}</div>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-        ${match ? statusPill('مطابق للخيام', '#85B7EB') : ''}
-        ${statusPill(t.score, color)}
-        ${statusPill(TENDER_FOLLOW_LABELS[t.followStatus] || 'جديدة', '#9a9898')}
-        ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'مناسبة')">مناسبة</button>` : ''}
-        ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'غير مناسبة')">غير مناسبة</button>` : ''}
-        ${linkBtn}
-        ${can('tenders') ? `<button class="btn-secondary" onclick="removeTender('${t.id}')">حذف</button>` : ''}
-      </div>
-    </div>`;
-  }).join('');
+  if (tender) {
+    const visibleTenders = tenders.filter(t => !tenderIsExpired(t));
+    const expiredCount = tenders.length - visibleTenders.length;
+    tender.innerHTML = (expiredCount > 0 ? `<div class="text-secondary" style="font-size:11px;margin-bottom:8px;padding:6px 10px;background:#1a1d2b;border-radius:6px;border:0.5px solid #2e3244">🚫 تم إخفاء ${expiredCount} منافسة منتهية الموعد</div>` : '') +
+    visibleTenders.map(t => {
+      const color = t.score === 'مناسبة' ? '#5DCAA5' : t.score === 'غير مناسبة' ? '#E24B4A' : '#FAC775';
+      const match = tenderMatchesProduct(t);
+      const expired = tenderIsExpired(t);
+      const linkBtn = t.url && t.url !== '#'
+        ? `<button class="btn-secondary" onclick="window.open('${t.url}')">الرابط</button>`
+        : `<button class="btn-secondary" onclick="showMsg('لا يوجد رابط محفوظ لهذه المنافسة')">الرابط</button>`;
+      const dueLabel = t.due
+        ? (expired ? `<span style="color:#E24B4A">⛔ انتهى ${t.due}</span>` : `آخر موعد ${t.due}`)
+        : '';
+      return `<div class="list-row" style="${expired ? 'opacity:0.5' : ''}">
+        <div>
+          <div style="font-weight:600">${t.title}</div>
+          <div class="text-secondary" style="margin-top:3px">${TENDER_TYPE_LABELS[t.type] || 'منافسة'} — ${t.entity || 'جهة غير محددة'}${dueLabel ? ' — ' + dueLabel : ''}${t.platform ? ' — ' + t.platform : ''}</div>
+          ${t.keyword ? `<div class="text-secondary" style="margin-top:3px">الكلمة: ${t.keyword}</div>` : ''}
+          ${t.action ? `<div class="text-secondary" style="margin-top:3px">الإجراء: ${t.action}</div>` : ''}
+          ${t.reason ? `<div class="text-secondary" style="margin-top:3px;font-size:11px">${t.reason}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">
+          ${match ? statusPill('مطابق للخيام', '#85B7EB') : ''}
+          ${statusPill(t.score, color)}
+          ${statusPill(TENDER_FOLLOW_LABELS[t.followStatus] || 'جديدة', '#9a9898')}
+          ${can('tenders') ? `<button class="btn-secondary" onclick="setTenderScore('${t.id}', 'مناسبة')">✓ مناسبة</button>` : ''}
+          ${can('tenders') ? `<button style="background:transparent;color:#E24B4A;border:0.5px solid #E24B4A;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer" onclick="openNotFitModal('${t.id}')" title="سجّل سبب عدم المناسبة">✗ غير مناسبة</button>` : ''}
+          ${linkBtn}
+          ${can('tenders') ? `<button class="btn-secondary" onclick="removeTender('${t.id}')">حذف</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
 }
 
 function advance(id) {
