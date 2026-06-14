@@ -1,6 +1,100 @@
 const { Pool } = require("pg");
 const crypto = require("crypto");
 
+/* ─── Email / SMTP ─── */
+let _mailerTransport = null;
+function getMailer() {
+  if (_mailerTransport) return _mailerTransport;
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || "465", 10);
+  const secure = process.env.SMTP_SECURE !== "false";
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) return null;
+  const nodemailer = require("nodemailer");
+  _mailerTransport = nodemailer.createTransport({ host, port, secure, auth: { user, pass } });
+  return _mailerTransport;
+}
+
+async function sendEmail(to, subject, html) {
+  const mailer = getMailer();
+  if (!mailer) return { ok: false, error: "إعدادات SMTP غير مكتملة" };
+  const fromName = process.env.EMAIL_FROM_NAME || "واحة الخيمة";
+  const fromAddr = process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER;
+  try {
+    await mailer.sendMail({ from: `"${fromName}" <${fromAddr}>`, to, subject, html });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function ensureEmailLogTable(client) {
+  await client.query(`
+    create table if not exists email_notification_logs (
+      id uuid primary key default gen_random_uuid(),
+      notification_type text not null,
+      recipient_user_id text,
+      recipient_email text,
+      related_type text,
+      related_id text,
+      subject text,
+      status text not null check (status in ('sent','failed')),
+      sent_at timestamptz,
+      error_message text,
+      created_at timestamptz not null default now()
+    )
+  `);
+}
+
+async function logEmailNotification(client, { type, userId, email, relatedType, relatedId, subject, status, error }) {
+  await ensureEmailLogTable(client);
+  await client.query(
+    `insert into email_notification_logs
+       (notification_type, recipient_user_id, recipient_email, related_type, related_id, subject, status, sent_at, error_message)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [type, userId || null, email || null, relatedType || null, relatedId || null,
+     subject || null, status, status === "sent" ? new Date() : null, error || null]
+  );
+}
+
+async function getNotificationPrefs(client) {
+  return (await getSetting(client, "notification_prefs")) || {};
+}
+
+async function sendEventEmail(client, eventType, { subject, html, relatedType, relatedId }) {
+  let prefs;
+  try { prefs = await getNotificationPrefs(client); } catch(e) { return; }
+  for (const [userName, cfg] of Object.entries(prefs)) {
+    if (!cfg || !cfg.enabled || !cfg.email) continue;
+    if (!Array.isArray(cfg.types) || !cfg.types.includes(eventType)) continue;
+    const result = await sendEmail(cfg.email, subject, html);
+    try {
+      await logEmailNotification(client, {
+        type: eventType, userId: userName, email: cfg.email,
+        relatedType, relatedId, subject,
+        status: result.ok ? "sent" : "failed",
+        error: result.ok ? null : result.error,
+      });
+    } catch(e) { /* log failure is non-critical */ }
+  }
+}
+
+function financeEmailHtml(entry, extra) {
+  const typeLabel = entry.type || entry.entryType || "";
+  return `<div dir="rtl" style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">
+    <h2 style="color:#1e3a5f">🏕️ واحة الخيمة — ${extra || typeLabel}</h2>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:6px;color:#555">النوع</td><td style="padding:6px;font-weight:bold">${typeLabel}</td></tr>
+      <tr><td style="padding:6px;color:#555">المبلغ</td><td style="padding:6px;font-weight:bold">${Number(entry.amount||0).toLocaleString()} ر.س</td></tr>
+      <tr><td style="padding:6px;color:#555">البيان</td><td style="padding:6px">${entry.note||entry.statement||''}</td></tr>
+      <tr><td style="padding:6px;color:#555">الحساب</td><td style="padding:6px">${entry.account||''}</td></tr>
+      <tr><td style="padding:6px;color:#555">أنشأها</td><td style="padding:6px">${entry.createdBy||entry.enteredBy||'—'}</td></tr>
+      <tr><td style="padding:6px;color:#555">التاريخ</td><td style="padding:6px">${String(entry.created||'').slice(0,10)}</td></tr>
+    </table>
+  </div>`;
+}
+
 const TYPE_MAP = {
   "مصروف": "expense",
   "عهدة": "custody",
@@ -1627,6 +1721,18 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/finance") {
       const entry = await createFinance(client, req.body || {}, user);
+      // fire email notification (non-blocking)
+      setImmediate(async () => {
+        let c2;
+        try {
+          c2 = await getPool().connect();
+          await sendEventEmail(c2, "finance", {
+            subject: `حركة مالية جديدة: ${entry.type} — ${Number(entry.amount||0).toLocaleString()} ر.س`,
+            html: financeEmailHtml(entry),
+            relatedType: "finance", relatedId: entry.id,
+          });
+        } catch(e) {} finally { if (c2) c2.release(); }
+      });
       return res.status(201).json({ ok: true, data: entry });
     }
 
@@ -1643,6 +1749,142 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/finance/rename-account") {
       const renamed = await renameBankAccount(client, req.body || {}, user);
       return res.status(200).json({ ok: true, data: renamed });
+    }
+
+    /* ─── Email endpoints ─── */
+    if (req.method === "GET" && path === "/email/logs") {
+      await ensureEmailLogTable(client);
+      const logs = await client.query(
+        "select * from email_notification_logs order by created_at desc limit 200"
+      );
+      return res.status(200).json({ ok: true, data: logs.rows });
+    }
+
+    if (req.method === "POST" && path === "/email/test") {
+      const targetUser = String(req.body?.user || "").trim();
+      const prefs = await getNotificationPrefs(client);
+      const cfg = prefs[targetUser];
+      if (!cfg || !cfg.email) {
+        return res.status(200).json({ ok: false, error: "لا يوجد إيميل لهذا الحساب" });
+      }
+      const subject = "اختبار تنبيهات واحة الخيمة";
+      const html = `<div dir="rtl" style="font-family:Arial,sans-serif">
+        <h2>🏕️ واحة الخيمة</h2>
+        <p>هذه رسالة اختبار من نظام تنبيهات واحة الخيمة.</p>
+        <p>إذا وصلتك هذه الرسالة فإعدادات البريد تعمل بشكل صحيح.</p>
+        <p style="color:#888;font-size:12px">أُرسلت في: ${new Date().toLocaleString("ar-SA")}</p>
+      </div>`;
+      const result = await sendEmail(cfg.email, subject, html);
+      await logEmailNotification(client, {
+        type: "test", userId: targetUser, email: cfg.email,
+        relatedType: "test", relatedId: null, subject,
+        status: result.ok ? "sent" : "failed",
+        error: result.ok ? null : result.error,
+      });
+      return res.status(200).json({ ok: result.ok, error: result.error });
+    }
+
+    if (req.method === "POST" && path === "/users/update-notifications") {
+      const prefs = await getNotificationPrefs(client);
+      const { userName, email, enabled, types } = req.body || {};
+      if (!userName) return res.status(400).json({ ok: false, error: "userName مطلوب" });
+      prefs[userName] = { email: email || "", enabled: !!enabled, types: Array.isArray(types) ? types : [] };
+      await setSetting(client, "notification_prefs", prefs);
+      return res.status(200).json({ ok: true, data: prefs });
+    }
+
+    if (req.method === "GET" && path === "/users/notification-prefs") {
+      const prefs = await getNotificationPrefs(client);
+      return res.status(200).json({ ok: true, data: prefs });
+    }
+
+    if (req.method === "POST" && path === "/email/check-payment-alerts") {
+      // Check confirmed quotes with install date in 2 days and remaining > 0
+      await ensureEmailLogTable(client);
+      const prefs = await getNotificationPrefs(client);
+      // Find saddam's config
+      const saddamCfg = prefs["صدام"];
+      const results = [];
+
+      if (!saddamCfg || !saddamCfg.email || !saddamCfg.enabled) {
+        return res.status(200).json({ ok: true, data: [], message: "تنبيهات المحاسب غير مفعلة أو لا يوجد إيميل" });
+      }
+      if (!Array.isArray(saddamCfg.types) || !saddamCfg.types.includes("payment_due")) {
+        return res.status(200).json({ ok: true, data: [], message: "تنبيه استحقاق الدفعات غير مفعل للمحاسب" });
+      }
+
+      // Get daftra_quote_states with install_date = today + 2
+      const twoDaysLater = new Date();
+      twoDaysLater.setDate(twoDaysLater.getDate() + 2);
+      const targetDate = twoDaysLater.toISOString().slice(0, 10);
+
+      const quotes = await client.query(
+        `select q.*, c.name as client_name
+         from daftra_quote_states q
+         left join customers c on c.name = q.assigned_to
+         where q.quote_confirmed = true
+           and q.install_date = $1`,
+        [targetDate]
+      );
+
+      for (const q of quotes.rows) {
+        const relatedId = q.local_key;
+        // Check if already notified
+        const existing = await client.query(
+          `select id from email_notification_logs
+           where notification_type = 'payment_due' and related_id = $1 and recipient_user_id = 'صدام'
+           limit 1`,
+          [relatedId]
+        );
+        if (existing.rows.length > 0) {
+          results.push({ relatedId, skipped: true, reason: "تم الإرسال مسبقاً" });
+          continue;
+        }
+
+        const clientName = q.client_name || q.assigned_to || "عميل";
+        const subject = "تنبيه استحقاق دفعة قبل التركيب";
+        const html = `<div dir="rtl" style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">
+          <h2 style="color:#b91c1c">⚠️ تنبيه استحقاق دفعة</h2>
+          <p>يوجد عميل موعد تركيبه بعد يومين (${targetDate}) ولديه مبلغ متبقي:</p>
+          <table style="width:100%;border-collapse:collapse;margin:12px 0">
+            <tr style="background:#f5f5f5"><td style="padding:8px">اسم العميل</td><td style="padding:8px;font-weight:bold">${clientName}</td></tr>
+            <tr><td style="padding:8px">رقم المرجع</td><td style="padding:8px">${q.local_key||'—'}</td></tr>
+            <tr style="background:#f5f5f5"><td style="padding:8px">تاريخ التركيب</td><td style="padding:8px">${targetDate}</td></tr>
+            <tr><td style="padding:8px">ملاحظات</td><td style="padding:8px">${q.notes||'—'}</td></tr>
+          </table>
+          <p style="color:#888;font-size:12px">أُرسل من نظام واحة الخيمة</p>
+        </div>`;
+
+        const result = await sendEmail(saddamCfg.email, subject, html);
+        await logEmailNotification(client, {
+          type: "payment_due", userId: "صدام", email: saddamCfg.email,
+          relatedType: "quote", relatedId,
+          subject, status: result.ok ? "sent" : "failed",
+          error: result.ok ? null : result.error,
+        });
+        results.push({ relatedId, clientName, sent: result.ok, error: result.error });
+      }
+
+      return res.status(200).json({ ok: true, data: results });
+    }
+
+    /* ─── Finance soft-delete endpoint ─── */
+    if (req.method === "POST" && path === "/finance/soft-delete") {
+      const { id, deletedBy, deletionReason } = req.body || {};
+      if (!id) return res.status(400).json({ ok: false, error: "id مطلوب" });
+      await client.query(
+        `update finance_entries set status = 'deleted', notes = COALESCE(notes,'') || $1 where id = $2`,
+        [`\n[محذوف بواسطة: ${deletedBy||'—'} — السبب: ${deletionReason||'—'}]`, id]
+      );
+      // Fire email if configured
+      try {
+        await sendEventEmail(client, "finance_delete", {
+          subject: "تم حذف حركة مالية",
+          html: `<div dir="rtl"><h3>🗑️ تم حذف حركة مالية</h3><p>بواسطة: ${deletedBy||'—'}</p><p>السبب: ${deletionReason||'—'}</p></div>`,
+          relatedType: "finance", relatedId: id,
+        });
+      } catch(e) {}
+      return res.status(200).json({ ok: true });
     }
 
     return res.status(404).json({ ok: false, error: "المسار غير موجود" });

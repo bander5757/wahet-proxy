@@ -389,6 +389,7 @@
 
 <div id="tab-home" class="tab-page active">
   <div id="executive-dashboard"></div>
+  <div id="notifications-admin" style="display:none;margin-top:16px"></div>
 </div>
 
 <div id="tab-clients" class="tab-page">
@@ -904,6 +905,28 @@
     <div class="flex gap-8">
       <button class="btn-primary" onclick="saveRenameEmpModal()">حفظ</button>
       <button class="btn-secondary" onclick="closeRenameEmpModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<div id="notif-edit-modal" class="staff-modal-overlay" style="display:none" onclick="if(event.target===this)closeNotifEditModal()">
+  <div class="staff-modal-box" style="max-height:90vh;overflow-y:auto">
+    <div class="staff-modal-title" id="nem-title">🔔 إعدادات التنبيهات</div>
+    <div style="margin-bottom:12px">
+      <div class="label">البريد الإلكتروني</div>
+      <input id="nem-email" type="email" placeholder="example@gmail.com" style="width:100%;margin-top:4px">
+    </div>
+    <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="nem-enabled" style="width:auto">
+      <label for="nem-enabled" style="font-size:13px;color:var(--text)">تفعيل إرسال التنبيهات</label>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="label" style="margin-bottom:6px">أنواع التنبيهات</div>
+      <div id="nem-types"></div>
+    </div>
+    <div class="flex gap-8">
+      <button class="btn-primary" onclick="saveNotifEditModal()">حفظ</button>
+      <button class="btn-secondary" onclick="closeNotifEditModal()">إلغاء</button>
     </div>
   </div>
 </div>
@@ -4933,6 +4956,172 @@ function render() {
   safe('التركيبات', renderOperations, 'install-list');
   safe('الموظفين والمنافسات', renderAssetsAndTenders, 'tender-list');
   safe('التقارير', renderReports, 'reports-view');
+  safe('إدارة التنبيهات', renderNotificationsAdmin, 'notifications-admin');
+}
+
+/* ─── Notification prefs (local cache) ─── */
+let _notifPrefs = {};
+try { _notifPrefs = JSON.parse(localStorage.getItem('wk_notif_prefs') || '{}'); } catch(e) {}
+
+const NOTIF_TYPES = [
+  { key: 'finance',       label: 'الحركات المالية' },
+  { key: 'finance_delete',label: 'حذف حركة مالية' },
+  { key: 'payment_due',   label: 'استحقاق دفعات' },
+  { key: 'staff_update',  label: 'تنبيهات الموظفين' },
+  { key: 'vehicle_update',label: 'تنبيهات السيارات' },
+  { key: 'quote_confirm', label: 'تأكيد عرض سعر' },
+  { key: 'install_update',label: 'تحديث تركيب' },
+  { key: 'payment_add',   label: 'إضافة دفعة' },
+];
+
+const SYSTEM_USERS = [
+  { name: 'بندر',    role: 'owner',     roleLabel: 'مدير' },
+  { name: 'ابو فايز',role: 'viewer',    roleLabel: 'مدير' },
+  { name: 'عمر',     role: 'supervisor',roleLabel: 'مشرف' },
+  { name: 'صدام',    role: 'accountant',roleLabel: 'محاسب' },
+];
+
+function renderNotificationsAdmin() {
+  const el = document.getElementById('notifications-admin');
+  if (!el) return;
+  if (!isBander()) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+
+  const userRows = SYSTEM_USERS.map(u => {
+    const cfg = _notifPrefs[u.name] || {};
+    const enabledTypes = cfg.types || [];
+    return `<div class="employee-card" style="margin-bottom:10px">
+      <div class="employee-card-header">
+        <span style="font-size:14px;font-weight:700">👤 ${htmlEscape(u.name)} <span style="font-size:11px;color:var(--text-3)">${u.roleLabel}</span></span>
+        <button class="doc-edit-btn" onclick="openNotifEditModal('${u.name}')">✏️ تعديل</button>
+      </div>
+      <div style="padding:10px 12px;font-size:12px">
+        <div style="margin-bottom:6px">
+          <span class="label">الإيميل: </span>
+          <span style="color:${cfg.email ? 'var(--green)' : 'var(--text-3)'}">${htmlEscape(cfg.email || 'غير مضاف')}</span>
+        </div>
+        <div style="margin-bottom:6px">
+          <span class="label">التنبيهات: </span>
+          ${statusPill(cfg.enabled ? 'مفعلة' : 'معطلة', cfg.enabled ? '#1a6b3f' : '#6b7a99')}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">
+          ${enabledTypes.map(t => { const info = NOTIF_TYPES.find(x=>x.key===t); return info ? `<span class="tender-chip">${htmlEscape(info.label)}</span>` : ''; }).join('')}
+          ${enabledTypes.length === 0 ? '<span style="color:var(--text-3);font-size:11px">لا توجد أنواع تنبيهات مفعلة</span>' : ''}
+        </div>
+        <div style="margin-top:8px">
+          <button class="doc-edit-btn" onclick="sendTestEmailTo('${u.name}')">📧 إيميل تجريبي</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="section">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:700">🔔 إدارة الحسابات والتنبيهات</div>
+          <div class="text-secondary" style="font-size:11px;margin-top:2px">يظهر لبندر فقط — إعداد إيميلات التنبيهات لكل حساب</div>
+        </div>
+        <button class="btn-secondary" onclick="checkPaymentAlertsNow()">📋 فحص تنبيهات الدفعات الآن</button>
+      </div>
+      ${userRows}
+      <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)">📨 سجل الإيميلات المرسلة</div>
+        <div id="email-logs-view"><div class="text-secondary" style="font-size:12px">اضغط لتحميل السجل</div></div>
+        <button class="btn-secondary" style="margin-top:8px;font-size:12px" onclick="loadEmailLogs()">تحميل سجل الإيميلات</button>
+      </div>
+    </div>`;
+}
+
+/* ─── Notif Edit Modal ─── */
+let _notifEditUser = '';
+function openNotifEditModal(name) {
+  _notifEditUser = name;
+  const cfg = _notifPrefs[name] || {};
+  const u = SYSTEM_USERS.find(x => x.name === name) || {};
+  document.getElementById('nem-title').textContent = '🔔 إعدادات تنبيهات ' + name;
+  document.getElementById('nem-email').value = cfg.email || '';
+  document.getElementById('nem-enabled').checked = !!cfg.enabled;
+  const typesContainer = document.getElementById('nem-types');
+  typesContainer.innerHTML = NOTIF_TYPES.map(t => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer">
+      <input type="checkbox" value="${t.key}" ${(cfg.types||[]).includes(t.key) ? 'checked' : ''} style="width:auto">
+      ${htmlEscape(t.label)}
+    </label>`).join('');
+  document.getElementById('notif-edit-modal').style.display = 'flex';
+}
+function closeNotifEditModal() {
+  document.getElementById('notif-edit-modal').style.display = 'none';
+}
+async function saveNotifEditModal() {
+  const name = _notifEditUser;
+  const email = document.getElementById('nem-email').value.trim();
+  const enabled = document.getElementById('nem-enabled').checked;
+  const types = [...document.querySelectorAll('#nem-types input:checked')].map(x => x.value);
+  const prefs = { ..._notifPrefs, [name]: { email, enabled, types } };
+  _notifPrefs = prefs;
+  try { localStorage.setItem('wk_notif_prefs', JSON.stringify(prefs)); } catch(e) {}
+  if (apiOnline) {
+    try {
+      await apiRequest('/users/update-notifications', {
+        method: 'POST',
+        body: JSON.stringify({ userName: name, email, enabled, types })
+      });
+      showMsg('✅ تم حفظ إعدادات التنبيهات في قاعدة البيانات');
+    } catch(e) {
+      showMsg('⚠️ تم الحفظ محلياً — تعذر الحفظ في قاعدة البيانات');
+    }
+  } else {
+    showMsg('✅ تم الحفظ محلياً');
+  }
+  closeNotifEditModal();
+  render();
+}
+
+async function sendTestEmailTo(userName) {
+  if (!apiOnline) { showMsg('⚠️ يتطلب اتصالاً بقاعدة البيانات'); return; }
+  showMsg('⏳ جاري الإرسال...');
+  try {
+    const res = await apiRequest('/email/test', { method: 'POST', body: JSON.stringify({ user: userName }) });
+    if (res.ok) showMsg('✅ تم إرسال الإيميل التجريبي بنجاح');
+    else showMsg('⚠️ ' + (res.error || 'فشل الإرسال'));
+  } catch(e) { showMsg('❌ ' + e.message); }
+}
+
+async function checkPaymentAlertsNow() {
+  if (!apiOnline) { showMsg('⚠️ يتطلب اتصالاً بقاعدة البيانات'); return; }
+  showMsg('⏳ جاري فحص تنبيهات الدفعات...');
+  try {
+    const res = await apiRequest('/email/check-payment-alerts', { method: 'POST', body: '{}' });
+    const sent = (res.data || []).filter(x => x.sent).length;
+    const skipped = (res.data || []).filter(x => x.skipped).length;
+    showMsg(`✅ فحص الدفعات: أُرسل ${sent} — تخطي ${skipped} (مكرر)`);
+    loadEmailLogs();
+  } catch(e) { showMsg('❌ ' + e.message); }
+}
+
+async function loadEmailLogs() {
+  const el = document.getElementById('email-logs-view');
+  if (!el) return;
+  if (!apiOnline) { el.innerHTML = '<div class="text-secondary" style="font-size:12px">غير متاح — وضع محلي</div>'; return; }
+  el.innerHTML = '<div class="text-secondary" style="font-size:12px">جاري التحميل...</div>';
+  try {
+    const res = await apiRequest('/email/logs');
+    const logs = res.data || [];
+    if (!logs.length) { el.innerHTML = '<div class="text-secondary" style="font-size:12px">لا توجد سجلات بعد</div>'; return; }
+    el.innerHTML = logs.slice(0,30).map(l => {
+      const pill = statusPill(l.status === 'sent' ? 'أُرسل' : 'فشل', l.status === 'sent' ? '#1a6b3f' : '#b91c1c');
+      return `<div class="list-row" style="font-size:12px">
+        <div>
+          <div style="font-weight:600">${htmlEscape(l.notification_type||'')} → ${htmlEscape(l.recipient_user_id||'—')}</div>
+          <div class="text-secondary" style="margin-top:2px">${htmlEscape(l.subject||'')} | ${htmlEscape(l.recipient_email||'—')}</div>
+          <div style="font-size:10px;color:var(--text-3)">${String(l.created_at||'').slice(0,16)}</div>
+          ${l.error_message ? `<div style="font-size:10px;color:var(--red)">${htmlEscape(l.error_message)}</div>` : ''}
+        </div>
+        <div>${pill}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML = `<div style="color:var(--red);font-size:12px">${htmlEscape(e.message)}</div>`; }
 }
 
 function showMsg(t) {
