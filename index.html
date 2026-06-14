@@ -3942,14 +3942,38 @@ function renderExecutive() {
   const el = document.getElementById('executive-dashboard');
   if (!el) return;
 
-  /* ── فلتر التاريخ: فواتير وعروض من 2026-06-01 فأكثر ── */
-  const confirmedInScope = clients.filter(c =>
-    isConfirmedSale(c) && dateOnly(c.created || c.updatedAt) >= FINANCE_START_DATE
-  );
+  /* ── فلتر التاريخ: فواتير وعروض من 2026-06-01 فأكثر ──
+     نستخدم c.created فقط (تاريخ المستند الفعلي).
+     لا نستخدم updatedAt لأنه قد يكون تاريخ مزامنة حديث لمستند قديم. ── */
+  const confirmedInScope = clients.filter(c => {
+    if (!isConfirmedSale(c)) return false;
+    const docDate = dateOnly(c.created); // تاريخ الفاتورة/العرض فقط
+    return docDate && docDate >= FINANCE_START_DATE;
+  });
   /* المبلغ المحصّل فعلياً (paid) — لا إجمالي الفاتورة */
   const actualIncome      = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
   /* المتبقي غير المسدد */
   const actualReceivables = confirmedInScope.reduce((s, c) => s + clientRemainingAmount(c), 0);
+  /* تشخيص — يظهر في console تفاصيل المستندات الداخلة في المتبقي */
+  if (isBander()) {
+    const receivableDetails = confirmedInScope
+      .filter(c => clientRemainingAmount(c) > 0)
+      .map(c => ({
+        نوع: isTaxInvoice(c) ? 'فاتورة' : 'عرض مؤكد',
+        رقم: c.daftraNo || c.id,
+        عميل: c.name,
+        تاريخ_المستند: dateOnly(c.created),
+        الإجمالي: clientTotalAmount(c),
+        المدفوع: clientPaidAmount(c),
+        المتبقي: clientRemainingAmount(c),
+      }));
+    console.group('📊 تفاصيل المتبقي للتحصيل (' + FINANCE_START_DATE + ' فأكثر)');
+    console.log('عدد المستندات في النطاق:', confirmedInScope.length);
+    console.log('منها لديها متبقي > 0:', receivableDetails.length);
+    console.table(receivableDetails);
+    console.log('إجمالي المتبقي:', actualReceivables);
+    console.groupEnd();
+  }
   /* المصروفات فقط (نوع=مصروف) من approvedFinanceEntries المفلترة بـ FINANCE_START_DATE */
   const totalExpenses     = approvedFinanceEntries()
     .filter(e => e.type === 'مصروف')
