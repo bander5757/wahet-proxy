@@ -3445,7 +3445,7 @@ function renderReports() {
   el.innerHTML = `
     <div class="grid-4">
       <div class="stat-card"><div class="label">الإيرادات المعتمدة</div><div style="font-size:20px;color:#5DCAA5;font-weight:800">${money(totals.income)}</div></div>
-      <div class="stat-card"><div class="label">المصروفات والعهد</div><div style="font-size:20px;color:#FAC775;font-weight:800">${money(totals.out)}</div></div>
+      <div class="stat-card"><div class="label">المصروفات المعتمدة</div><div style="font-size:20px;color:#FAC775;font-weight:800">${money(totals.out)}</div></div>
       <div class="stat-card"><div class="label">العهد المتبقية</div><div style="font-size:20px;color:${custodyRemainingTotal > 0 ? '#E24B4A' : '#5DCAA5'};font-weight:800">${money(custodyRemainingTotal)}</div></div>
       <div class="stat-card"><div class="label">دخل عروض مؤكدة</div><div style="font-size:20px;color:#85B7EB;font-weight:800">${money(confirmedQuotes.reduce((s,c)=>s+clientTotalAmount(c),0))}</div></div>
     </div>
@@ -3957,45 +3957,66 @@ function renderExecutive() {
   if (!el) return;
 
   /* ── فلتر التاريخ ──
-     c.created = firstDate(inv.date, inv.created_at, inv.created) من دفترة
-               = تاريخ الإضافة اليدوية للعملاء اليدويين
-     لا نستخدم updatedAt (تاريخ مزامنة وليس تاريخ مستند). ── */
-  const _receivablesIncluded = [];
-  const _receivablesExcluded = [];
+     c.created = firstDate(inv.date, inv.created_at, inv.created) من دفترة.
+     لا نستخدم updatedAt (تاريخ مزامنة وليس تاريخ المستند). ── */
+
+  /* قائمتان منفصلتان:
+     _incomeScope    — كل المؤكدين من 2026-06-01 (بما فيهم المسددون بالكامل) → للإيراد
+     _receivablesIncluded — من له متبقي > 0 فقط → للمتبقي للتحصيل */
+  const _incomeScope           = [];
+  const _receivablesIncluded   = [];
+  const _receivablesExcluded   = [];
 
   clients.forEach(c => {
-    const docDate = dateOnly(c.created); // تاريخ المستند — لا نرجع لـ updatedAt
+    const docDate = dateOnly(c.created); // تاريخ المستند — لا رجوع لـ updatedAt
 
-    const reason = !isConfirmedSale(c)          ? 'غير مؤكد'
-      : !docDate                                 ? 'لا يوجد تاريخ مستند'
-      : docDate < FINANCE_START_DATE             ? 'قبل تاريخ بداية الحساب'
-      : clientRemainingAmount(c) <= 0            ? 'لا يوجد متبقي'
-      : null;
-
-    if (!reason) {
+    if (!isConfirmedSale(c)) {
+      _receivablesExcluded.push({ c, docDate, reason: 'غير مؤكد' }); return;
+    }
+    if (!docDate) {
+      _receivablesExcluded.push({ c, docDate, reason: 'لا يوجد تاريخ مستند' }); return;
+    }
+    if (docDate < FINANCE_START_DATE) {
+      _receivablesExcluded.push({ c, docDate, reason: 'قبل تاريخ بداية الحساب' }); return;
+    }
+    /* مؤكد + في النطاق الزمني → يدخل في الإيراد دائماً */
+    _incomeScope.push({ c, docDate });
+    if (clientRemainingAmount(c) > 0) {
       _receivablesIncluded.push({ c, docDate });
     } else {
-      _receivablesExcluded.push({ c, docDate, reason });
+      _receivablesExcluded.push({ c, docDate, reason: 'لا يوجد متبقي (مسدد بالكامل)' });
     }
   });
 
-  const confirmedInScope = _receivablesIncluded.map(x => x.c);
-
-  /* الإيراد = مدفوع دفترة (confirmed clients) + إيرادات يدوية معتمدة */
-  const daftraIncome   = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
+  /* الإيراد = مدفوع دفترة من كل المؤكدين في النطاق + إيرادات يدوية معتمدة */
+  const daftraIncome   = _incomeScope.reduce((s, { c }) => s + clientPaidAmount(c), 0);
   const manualIncome   = approvedFinanceEntries()
     .filter(e => e.type === 'إيراد')
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const actualIncome   = daftraIncome + manualIncome;
 
-  const actualReceivables = confirmedInScope.reduce((s, c) => s + clientRemainingAmount(c), 0);
+  /* المتبقي = فقط المستندات ذات remaining > 0 */
+  const actualReceivables = _receivablesIncluded.reduce((s, { c }) => s + clientRemainingAmount(c), 0);
 
-  /* حفظ للـ modal */
-  window._kpiReceivablesData = { included: _receivablesIncluded, excluded: _receivablesExcluded, total: actualReceivables };
-  /* المصروفات فقط (نوع=مصروف) من approvedFinanceEntries المفلترة بـ FINANCE_START_DATE */
-  const totalExpenses     = approvedFinanceEntries()
+  /* المصروفات = type=مصروف فقط، مفلترة بـ FINANCE_START_DATE عبر approvedFinanceEntries */
+  const totalExpenses = approvedFinanceEntries()
     .filter(e => e.type === 'مصروف')
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  /* بيانات التحقق للـ modal */
+  const _approvedExpEntries = approvedFinanceEntries().filter(e => e.type === 'مصروف');
+  const _custodyEntries     = approvedFinanceEntries().filter(e => e.type === 'عهدة');
+  const _salaryEntries      = approvedFinanceEntries().filter(e => e.type === 'سلفة');
+  window._kpiReceivablesData = {
+    included: _receivablesIncluded, excluded: _receivablesExcluded,
+    total: actualReceivables,
+    verify: {
+      daftraIncomeCount: _incomeScope.length, daftraIncome,
+      manualIncome, actualIncome,
+      expCount: _approvedExpEntries.length, totalExpenses,
+      custodyCount: _custodyEntries.length, salaryCount: _salaryEntries.length,
+    }
+  };
 
   const pendingQuotes     = clients.filter(isActiveFollowupQuote);
   const unbilledConfirmed = clients.filter(c => isConfirmedSale(c) && !isTaxInvoice(c));
