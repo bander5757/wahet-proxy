@@ -447,14 +447,8 @@
       </div>
       <div id="bank-accounts-view"></div>
     </div>
-    <div class="section" style="margin-top:12px">
-      <div class="flex-between mb-12">
-        <div>
-          <div style="font-size:15px;font-weight:600">الدليل المحاسبي المعتمد</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">قوائم الإدخال المالي مبنية على الحسابات النهائية بعد تصحيح التكرارات</div>
-        </div>
-        <span id="accounting-guide-count" class="badge" style="background:#1a3a5c;color:#85B7EB">0 حساب</span>
-      </div>
+    <div style="display:none" aria-hidden="true">
+      <span id="accounting-guide-count"></span>
       <div id="accounting-guide-view"></div>
     </div>
     <div class="section" style="margin-top:12px">
@@ -1182,7 +1176,7 @@ function renderBankAccounts() {
           <div class="label">${htmlEscape(a.name)}</div>
           <div class="flex gap-6">
             <button class="btn-secondary" style="padding:2px 7px;font-size:11px" onclick="renameBankAccount('${a.id}')">تسمية</button>
-            <button class="btn-secondary" style="padding:2px 7px;font-size:11px" onclick="updateBankOpening('${a.id}')">الرصيد</button>
+            <button title="تحديث الرصيد الافتتاحي" style="padding:2px 8px;font-size:15px;background:transparent;border:1px solid var(--border);border-radius:7px;cursor:pointer" onclick="updateBankOpening('${a.id}')">🏦</button>
           </div>
         </div>
         <div style="font-size:19px;font-weight:800;color:${accountBalance(a.name) >= 0 ? '#5DCAA5' : '#E24B4A'}">${money(accountBalance(a.name))}</div>
@@ -2476,16 +2470,49 @@ async function createFinanceEntry(entry, successText) {
   showMsg((savedRemote ? '✅ ' : '✅ محلياً: ') + successText);
 }
 
+function showPaymentDialog(clientName, fullAmount) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '200';
+    const accountOptions = bankAccounts.map((a, i) =>
+      `<option value="${htmlEscape(a.name)}">${htmlEscape(a.name)}</option>`).join('');
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:360px">
+        <div style="font-size:15px;font-weight:700;margin-bottom:14px">💰 تسجيل دفعة — ${htmlEscape(clientName)}</div>
+        <div class="label">المبلغ</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input id="pd-amount" type="number" placeholder="0" value="${fullAmount || ''}" style="flex:1">
+          <button class="btn-sync" style="white-space:nowrap;padding:0 12px" onclick="document.getElementById('pd-amount').value='${fullAmount || 0}'">كامل المبلغ<br><small style="font-size:10px">${fullAmount ? Number(fullAmount).toLocaleString() + ' ر.س' : ''}</small></button>
+        </div>
+        <div class="label">الحساب البنكي</div>
+        <select id="pd-account" style="margin-bottom:16px">${accountOptions}</select>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" style="flex:1" onclick="
+            const a = Number(document.getElementById('pd-amount').value)||0;
+            const ac = document.getElementById('pd-account').value;
+            document.body.removeChild(this.closest('.modal-overlay'));
+            window._pdResolve({amount:a,account:ac});
+          ">تسجيل</button>
+          <button class="btn-secondary" onclick="document.body.removeChild(this.closest('.modal-overlay'));window._pdResolve(null)">إلغاء</button>
+        </div>
+      </div>`;
+    window._pdResolve = resolve;
+    document.body.appendChild(overlay);
+    setTimeout(() => { const el = document.getElementById('pd-amount'); if(el) el.focus(); }, 50);
+  });
+}
+
 async function recordClientReceipt(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
   normalizeBankAccounts();
   const state = clientPaymentState(client);
-  const amount = Number(prompt('كم الدفعة المستلمة من ' + (client.name || 'العميل') + '؟', String(state.remaining || state.total || 0)) || 0) || 0;
+  const fullAmount = state.remaining > 0 ? state.remaining : state.total;
+  const amountResult = await showPaymentDialog(client.name || 'العميل', fullAmount);
+  if (!amountResult) return;
+  const { amount, account } = amountResult;
   if (!amount) { showMsg('أدخل مبلغ الدفعة'); return; }
-  const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
-  const selected = Number(prompt('اختر رقم الحساب:\n' + accountNames, '1') || 1) - 1;
-  const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
   const chartAccountId = defaultRevenueCategory();
   if (!requirePostableCategory(chartAccountId, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
   const category = accountDisplay(chartAccountId);
