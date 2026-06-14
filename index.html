@@ -3323,16 +3323,15 @@ function periodEntries(days) {
 }
 
 function financeTotals(entries = financeEntries) {
-  const incomeTypes = new Set(['إيراد']);
-  const outTypes = new Set(['مصروف','عهدة','سلفة']);
-  const debtTypes = new Set(['دين']);
+  /* out = مصروف فقط — العهد والسلف ليست مصروفات */
   return entries.reduce((a, e) => {
-    if (incomeTypes.has(e.type)) a.income += e.amount;
-    if (outTypes.has(e.type)) a.out += e.amount;
-    if (debtTypes.has(e.type)) a.debt += e.amount;
-    if (e.type === 'عهدة') a.custody += e.amount;
+    if (e.type === 'إيراد')   a.income  += e.amount;
+    if (e.type === 'مصروف')  a.out     += e.amount;
+    if (e.type === 'دين')     a.debt    += e.amount;
+    if (e.type === 'عهدة')   a.custody += e.amount;
+    if (e.type === 'سلفة')   a.salary  += e.amount;
     return a;
-  }, { income: 0, out: 0, debt: 0, custody: 0 });
+  }, { income: 0, out: 0, debt: 0, custody: 0, salary: 0 });
 }
 /* الحركات المالية تُحتسب اعتباراً من هذا التاريخ فقط */
 const FINANCE_START_DATE = '2026-06-01';
@@ -3957,33 +3956,38 @@ function renderExecutive() {
   const el = document.getElementById('executive-dashboard');
   if (!el) return;
 
-  /* ── فلتر التاريخ — يستخدم تاريخ المستند الحقيقي من دفترة فقط ──
-     daftraDate = est.date أو i.date (تاريخ إصدار المستند).
-     لا يستخدم: updatedAt, created_at, تاريخ المزامنة.
-     للعملاء اليدويين: تاريخ الإضافة اليدوية (c.created). ── */
+  /* ── فلتر التاريخ ──
+     c.created = firstDate(inv.date, inv.created_at, inv.created) من دفترة
+               = تاريخ الإضافة اليدوية للعملاء اليدويين
+     لا نستخدم updatedAt (تاريخ مزامنة وليس تاريخ مستند). ── */
   const _receivablesIncluded = [];
   const _receivablesExcluded = [];
 
   clients.forEach(c => {
-    const docDate = c.source === 'manual'
-      ? dateOnly(c.created)     // يدوي: تاريخ الإضافة
-      : (c.daftraDate || '');   // دفترة: est.date / i.date فقط
+    const docDate = dateOnly(c.created); // تاريخ المستند — لا نرجع لـ updatedAt
 
     const reason = !isConfirmedSale(c)          ? 'غير مؤكد'
-      : !docDate                                 ? 'لا يوجد تاريخ مستند حقيقي'
+      : !docDate                                 ? 'لا يوجد تاريخ مستند'
       : docDate < FINANCE_START_DATE             ? 'قبل تاريخ بداية الحساب'
       : clientRemainingAmount(c) <= 0            ? 'لا يوجد متبقي'
       : null;
 
-    if (!reason && isConfirmedSale(c)) {
+    if (!reason) {
       _receivablesIncluded.push({ c, docDate });
-    } else if (reason) {
+    } else {
       _receivablesExcluded.push({ c, docDate, reason });
     }
   });
 
-  const confirmedInScope  = _receivablesIncluded.map(x => x.c);
-  const actualIncome      = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
+  const confirmedInScope = _receivablesIncluded.map(x => x.c);
+
+  /* الإيراد = مدفوع دفترة (confirmed clients) + إيرادات يدوية معتمدة */
+  const daftraIncome   = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
+  const manualIncome   = approvedFinanceEntries()
+    .filter(e => e.type === 'إيراد')
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const actualIncome   = daftraIncome + manualIncome;
+
   const actualReceivables = confirmedInScope.reduce((s, c) => s + clientRemainingAmount(c), 0);
 
   /* حفظ للـ modal */
