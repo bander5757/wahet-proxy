@@ -39,29 +39,32 @@ const TENDER_STATUS_MAP = {
 };
 const TENDER_STATUS_LABELS = Object.fromEntries(Object.entries(TENDER_STATUS_MAP).map(([label, key]) => [key, label]));
 const RADAR_KEYWORDS = [
+  "خيام أوروبية",
+  "خيام اوروبية",
+  "خيمة أوروبية",
+  "تأجير خيام",
+  "ايجار خيام",
+  "توريد خيام",
+  "خيام فعاليات",
+  "ضيافة خيام",
+  "مخيمات فعاليات",
   "خيام",
   "خيمة",
-  "خيم",
-  "فعاليات",
-  "مؤتمرات",
-  "معارض",
-  "اللقاءات",
-  "ورش العمل",
-  "ضيافة",
-  "استقبال",
-  "مهرجان",
-  "مخيم",
+  "مخيم فاخر",
 ];
 const RADAR_NEGATIVE_WORDS = [
-  "قطع غيار",
-  "سيارات",
-  "نظافة",
-  "تقنية المعلومات",
-  "رخص رقمية",
-  "طباعة",
-  "فريون",
-  "قواعد البيانات",
-  "معدات التحقق",
+  "قطع غيار", "سيارات", "نظافة", "تقنية المعلومات",
+  "رخص رقمية", "طباعة", "فريون", "قواعد البيانات",
+  "معدات التحقق", "خيام رحلات", "خيام بر", "خيام أطفال",
+  "حراج", "مستعملة", "السنيدي", "القاضي", "خياط خيام",
+  "أرخص خيام", "تفصيل خيام شعر",
+];
+// كلمات مشروطة: سلبية إلا إذا اقترنت بالإيجار
+const RADAR_CONDITIONAL_NEGATIVE = [
+  { trigger: "بيت شعر", allowIf: ["إيجار","ايجار","تأجير","تاجير","استئجار"] },
+  { trigger: "خيام شعر", allowIf: ["إيجار","ايجار","تأجير","تاجير","استئجار"] },
+  { trigger: "بيوت شعر", allowIf: ["إيجار","ايجار","تأجير","تاجير","استئجار"] },
+  { trigger: "تفصيل", allowIf: [] },
 ];
 
 let pool;
@@ -865,16 +868,59 @@ function textIncludesAny(text, words) {
 function radarTenderFit(item, keyword) {
   const text = [item.tenderName, item.tenderActivityName, item.agencyName, item.tenderTypeName].filter(Boolean).join(" ");
   if (textIncludesAny(text, RADAR_NEGATIVE_WORDS)) return null;
-  const strong = textIncludesAny(text, ["خيام", "خيمة", "خيم", "مخيم"]);
-  const event = textIncludesAny(text, ["فعاليات", "مؤتمرات", "معارض", "اللقاءات", "ورش العمل", "ضيافة", "استقبال", "مهرجان"]);
-  if (!strong && !event) return null;
+  // فحص الكلمات المشروطة
+  for (const rule of RADAR_CONDITIONAL_NEGATIVE) {
+    if (textIncludesAny(text, [rule.trigger])) {
+      if (!rule.allowIf.length || !textIncludesAny(text, rule.allowIf)) return null;
+    }
+  }
+  const strong = textIncludesAny(text, ["خيام أوروبية","خيام اوروبية","خيمة أوروبية","تأجير خيام","توريد خيام"]);
+  const medium = textIncludesAny(text, ["خيام","خيمة","خيم","مخيم"]);
+  const event = textIncludesAny(text, ["فعاليات","مؤتمرات","معارض","ضيافة","استقبال","مهرجان"]);
+  if (!strong && !medium && !event) return null;
   return {
-    status: strong ? "fit" : "review",
+    status: strong ? "fit" : medium ? "review" : "review",
     action: strong ? "تجهيز عرض سعر" : "مراجعة الرابط",
     reason: strong
-      ? `مطابقة قوية لكلمة ${keyword}: ${item.tenderActivityName || item.tenderTypeName || "منافسة اعتماد"}`
-      : `فرصة محتملة مرتبطة بالفعاليات أو الضيافة: ${item.tenderActivityName || item.tenderTypeName || "منافسة اعتماد"}`,
+      ? `مطابقة قوية — ${keyword}: ${item.tenderActivityName || item.tenderTypeName || ""}`
+      : `فرصة محتملة — ${keyword}: ${item.tenderActivityName || item.tenderTypeName || ""}`,
   };
+}
+
+async function claudeAnalyzeTender(item) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic.default({ apiKey });
+    const text = `
+عنوان المنافسة: ${item.tenderName || ""}
+الجهة: ${item.agencyName || item.branchName || ""}
+نوع النشاط: ${item.tenderActivityName || ""}
+نوع المنافسة: ${item.tenderTypeName || ""}
+آخر موعد: ${item.lastOfferPresentationDate || "غير محدد"}
+`.trim();
+    const msg = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      messages: [{
+        role: "user",
+        content: `أنت مساعد لشركة واحة الخيمة المتخصصة في تأجير الخيام الأوروبية الفاخرة للفعاليات والمهرجانات في السعودية.
+
+${text}
+
+هل هذه المنافسة مناسبة لشركتنا؟ أجب بـ JSON فقط بدون أي نص إضافي:
+{"status":"fit"|"review"|"not_fit","score":1-10,"reason":"سبب مختصر بالعربي بجملة واحدة","action":"الإجراء المقترح"}
+
+fit = مناسبة جداً، review = تحتاج مراجعة، not_fit = غير مناسبة`
+      }]
+    });
+    const raw = msg.content[0]?.text?.trim() || "";
+    const json = raw.match(/\{[\s\S]*\}/)?.[0];
+    return json ? JSON.parse(json) : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function etimadSearchUrl(keyword) {
@@ -931,14 +977,27 @@ async function scanEtimadTenders(client) {
   }
 
   const saved = [];
+  const useAI = !!process.env.ANTHROPIC_API_KEY;
   for (const { item, keyword, fit } of seen.values()) {
     const externalKey = `etimad:${item.tenderId || item.referenceNumber || item.tenderNumber}`;
     const sourceUrl = etimadSearchUrl(keyword);
+    // تحليل Claude إذا كان المفتاح موجود
+    let finalFit = fit;
+    if (useAI) {
+      const ai = await claudeAnalyzeTender(item);
+      if (ai) {
+        finalFit = {
+          status: ai.status,
+          action: ai.action || fit.action,
+          reason: `🤖 رادار كلود: ${ai.reason} (درجة ${ai.score}/10)`,
+        };
+      }
+    }
     const result = await client.query(
       `insert into tenders
         (title, entity_name, source_name, source_url, external_key, matched_keyword,
          opportunity_type, due_on, fit_status, fit_reason, suggested_action, follow_status, decision, last_seen_at)
-       values ($1, $2, 'اعتماد', $3, $4, $5, 'tender', $6, $7, $8, $9, 'new', $10, now())
+       values ($1, $2, $3, $4, $5, $6, 'tender', $7, $8, $9, $10, 'new', $11, now())
        on conflict (external_key) where external_key is not null
        do update set
          source_url = excluded.source_url,
@@ -953,20 +1012,21 @@ async function scanEtimadTenders(client) {
       [
         item.tenderName || "منافسة اعتماد",
         item.agencyName || item.branchName || "",
+        useAI ? "رادار كلود" : "اعتماد",
         sourceUrl,
         externalKey,
         keyword,
         item.lastOfferPresentationDate ? String(item.lastOfferPresentationDate).slice(0, 10) : null,
-        fit.status,
-        `${fit.reason}. رقم المنافسة: ${item.referenceNumber || item.tenderNumber || item.tenderId}. نوعها: ${item.tenderTypeName || "غير محدد"}.`,
-        fit.action,
-        `نشاط اعتماد: ${item.tenderActivityName || "غير محدد"}`,
+        finalFit.status,
+        `${finalFit.reason} — رقم: ${item.referenceNumber || item.tenderNumber || item.tenderId}`,
+        finalFit.action,
+        `نشاط: ${item.tenderActivityName || "غير محدد"}`,
       ]
     );
     saved.push(tenderRow(result.rows[0]));
   }
 
-  return { saved, errors, keywords: RADAR_KEYWORDS };
+  return { saved, errors, keywords: RADAR_KEYWORDS, ai: useAI };
 }
 
 async function getSetting(client, key) {

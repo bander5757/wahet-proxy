@@ -507,11 +507,11 @@
   <div class="section">
     <div class="flex-between mb-12">
       <div>
-        <div style="font-size:15px;font-weight:600">رادار المنافسات</div>
+        <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">🤖 رادار كلود<span style="font-size:10px;background:#2a1a3c;color:#c084fc;border:0.5px solid #5b3090;border-radius:4px;padding:1px 6px">AI</span></div>
         <div style="font-size:11px;color:#9a9898;margin-top:2px">جلب وتنبيه فعلي من اعتماد للفرص المناسبة للخيام الأوروبية والفعاليات</div>
       </div>
       <div class="flex gap-6">
-        <button class="btn-sync" data-action="tenders" onclick="runTenderRadar()">جلب اعتماد الآن</button>
+        <button class="btn-sync" data-action="tenders" onclick="runTenderRadar()">🔍 جلب الآن</button>
         <button class="btn-secondary" data-action="tenders" onclick="toggleTenderForm()">+ فرصة</button>
       </div>
     </div>
@@ -3656,8 +3656,8 @@ function renderAssetsAndTenders() {
   const tender = document.getElementById('tender-list');
   const tenderPlatforms = document.getElementById('tender-platforms');
   if (tenderPlatforms) tenderPlatforms.innerHTML = `
-    <div style="font-size:13px;font-weight:700;color:#5DCAA5">اعتماد متصل بالجلب الفعلي</div>
-    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">يضغط بندر أو المشرف زر جلب اعتماد الآن، ويحفظ النظام الفرص المطابقة في البطاقات أدناه من مصدر اعتماد. تنافس وفرص نربطها لاحقاً بعد توفر API أو endpoint ثابت.</div>`;
+    <div style="font-size:13px;font-weight:700;color:#c084fc">🤖 رادار كلود — متصل</div>
+    <div class="text-secondary" style="font-size:11px;line-height:1.7;margin-top:8px">يعمل تلقائياً كل يوم الساعة 7 صباحاً — يسحب من اعتماد بـ 12 كلمة مفتاحية، يحللها بـ Claude AI، ويحفظ الفرص المناسبة للخيام الأوروبية تلقائياً.</div>`;
   const tenderKeywords = document.getElementById('tender-keywords');
   if (tenderKeywords) tenderKeywords.innerHTML = `
     <div class="tender-chip-grid">
@@ -3673,15 +3673,24 @@ function renderAssetsAndTenders() {
       <div class="section" style="margin-bottom:12px">
         <div class="flex-between mb-12">
           <div>
-            <div style="font-size:14px;font-weight:600">رصد اعتماد الفعلي</div>
-            <div class="text-secondary" style="font-size:11px;margin-top:2px">${radarDate ? 'آخر فحص: ' + radarDate + (lastCount ? ' — نتائج محفوظة/محدثة: ' + lastCount : '') : 'اضغط جلب اعتماد الآن لجلب المنافسات من اعتماد'}</div>
+            <div style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+              <span style="font-size:18px">🤖</span> رادار كلود
+              <span style="font-size:10px;background:#2a1a3c;color:#c084fc;border:0.5px solid #5b3090;border-radius:4px;padding:1px 6px;font-weight:600">AI</span>
+            </div>
+            <div class="text-secondary" style="font-size:11px;margin-top:3px">${radarDate ? 'آخر فحص: ' + radarDate + (lastCount ? ' — ' + lastCount + ' فرصة' : '') : 'يعمل تلقائياً يومياً — أو اضغط جلب الآن'}</div>
           </div>
           <div class="flex gap-6">
-            <button class="btn-sync" onclick="runTenderRadar()">جلب اعتماد الآن</button>
+            <button class="btn-sync" onclick="runTenderRadar()">🔍 جلب الآن</button>
           </div>
         </div>
-        <div class="text-secondary" style="font-size:12px;line-height:1.8">النظام يتصل بمصدر اعتماد العام، يفلتر الفرص المناسبة للخيام الأوروبية والفعاليات، ثم يحفظها في البطاقات أدناه.</div>
-        ${lastErrors.length ? `<div class="text-secondary" style="font-size:11px;margin-top:8px;color:#EF9F27">تنبيه: تعذر فحص بعض الكلمات مؤقتاً (${lastErrors.length}).</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+          <span style="font-size:10px;background:#0d2b1a;color:#5DCAA5;border:0.5px solid #1a5c38;border-radius:4px;padding:2px 7px">⏰ يومي 7ص تلقائي</span>
+          <span style="font-size:10px;background:#1a3a5c;color:#85B7EB;border:0.5px solid #2c5f91;border-radius:4px;padding:2px 7px">📡 اعتماد</span>
+          <span style="font-size:10px;background:#2a1a3c;color:#c084fc;border:0.5px solid #5b3090;border-radius:4px;padding:2px 7px">🤖 تحليل Claude AI</span>
+          <span style="font-size:10px;background:#2a0d0d;color:#e87878;border:0.5px solid #5c1a1a;border-radius:4px;padding:2px 7px">🚫 فلترة تلقائية</span>
+          <span style="font-size:10px;background:#2a1f0d;color:#FAC775;border:0.5px solid #5c4010;border-radius:4px;padding:2px 7px">🗑️ منتهية مخفية</span>
+        </div>
+        ${lastErrors.length ? `<div style="font-size:11px;color:#EF9F27;margin-top:4px">⚠️ تعذر فحص ${lastErrors.length} كلمة مؤقتاً</div>` : ''}
       </div>`;
   }
   if (tender) {
