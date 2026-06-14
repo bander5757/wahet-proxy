@@ -2874,7 +2874,7 @@ function closeFinanceDeleteModal() {
   document.getElementById('finance-delete-modal').style.display = 'none';
 }
 
-function confirmFinanceDelete() {
+async function confirmFinanceDelete() {
   const id = document.getElementById('fdm-id').value;
   const reasonSel = document.getElementById('fdm-reason').value;
   const reasonNote = document.getElementById('fdm-reason-note').value.trim();
@@ -2882,17 +2882,27 @@ function confirmFinanceDelete() {
   const reason = reasonNote ? reasonSel + ' — ' + reasonNote : reasonSel;
   const idx = financeEntries.findIndex(x => x.id === id);
   if (idx < 0) return;
-  financeEntries[idx] = {
+  const deletedEntry = {
     ...financeEntries[idx],
     is_deleted: true,
     deleted_at: new Date().toISOString(),
     deleted_by: currentUser?.name || 'غير معروف',
     deletion_reason: reason
   };
+  financeEntries[idx] = deletedEntry;
   saveFinance();
   closeFinanceDeleteModal();
-  showMsg('✅ تم حذف الحركة (soft delete) — يمكن مراجعتها في تقرير الحذف');
   render();
+  try {
+    await apiRequest('/finance/soft-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, deletedBy: currentUser?.name || 'غير معروف', deletionReason: reason })
+    });
+    showMsg('✅ تم حذف الحركة — يمكن مراجعتها في تقرير الحذف');
+  } catch(e) {
+    showMsg('⚠️ تم الحذف محلياً ولكن فشل المزامنة مع الخادم: ' + e.message);
+  }
 }
 
 /* ─── Rename employee ─── */

@@ -1886,9 +1886,16 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/finance/soft-delete") {
       const { id, deletedBy, deletionReason } = req.body || {};
       if (!id) return res.status(400).json({ ok: false, error: "id مطلوب" });
+      await client.query(`
+        alter table finance_entries
+          add column if not exists is_deleted boolean not null default false,
+          add column if not exists deleted_at timestamptz,
+          add column if not exists deleted_by text,
+          add column if not exists deletion_reason text
+      `);
       await client.query(
-        `update finance_entries set status = 'deleted', notes = COALESCE(notes,'') || $1 where id = $2`,
-        [`\n[محذوف بواسطة: ${deletedBy||'—'} — السبب: ${deletionReason||'—'}]`, id]
+        `update finance_entries set is_deleted = true, deleted_at = now(), deleted_by = $1, deletion_reason = $2 where id = $3`,
+        [deletedBy || '—', deletionReason || '—', id]
       );
       // Fire email if configured
       try {
