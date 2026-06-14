@@ -1235,6 +1235,7 @@ const saveTenders = () => {
 async function apiRequest(path, options = {}) {
   const res = await fetch(APP_API + path, {
     ...options,
+    cache: 'no-store',
     headers: { 'Content-Type': 'application/json', ...(authToken ? { 'X-Wahet-Token': authToken } : {}), ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
@@ -1247,16 +1248,21 @@ async function loadAppData() {
   const dbStatus = document.getElementById('db-status');
   let data;
   try {
-    data = await apiRequest('/bootstrap');
+    data = await apiRequest('/bootstrap?ts=' + Date.now());
   } catch(e) {
-    apiOnline = false;
-    if (dbStatus) {
-      dbStatus.textContent = 'وضع محلي - لم يتم ربط قاعدة البيانات';
-      dbStatus.style.color = '#FAC775';
+    try {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      data = await apiRequest('/bootstrap?retry=' + Date.now());
+    } catch(retryError) {
+      apiOnline = false;
+      if (dbStatus) {
+        dbStatus.textContent = 'وضع محلي - لم يتم ربط قاعدة البيانات';
+        dbStatus.style.color = '#FAC775';
+      }
+      console.warn('تعذر تحميل بيانات قاعدة البيانات', retryError);
+      showMsg('⚠️ يعمل النظام محلياً حتى يتم ربط قاعدة البيانات');
+      return;
     }
-    console.warn('تعذر تحميل بيانات قاعدة البيانات', e);
-    showMsg('⚠️ يعمل النظام محلياً حتى يتم ربط قاعدة البيانات');
-    return;
   }
 
   apiOnline = true;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wahet-khaima-v23';
+const CACHE_NAME = 'wahet-khaima-v24';
 const APP_SHELL = [
   '/',
   '/index.html',
