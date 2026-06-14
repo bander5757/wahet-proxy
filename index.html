@@ -3941,20 +3941,61 @@ async function copyAccountingReport() {
 function renderExecutive() {
   const el = document.getElementById('executive-dashboard');
   if (!el) return;
-  const confirmedRevenue = clients.filter(isConfirmedSale).reduce((s,c)=>s+c.offerPrice,0);
-  const receivables = clients.filter(isConfirmedSale).reduce((s,c)=>s+(c.remaining||0),0);
-  const pendingQuotes = clients.filter(isActiveFollowupQuote);
+
+  /* ── فلتر التاريخ: فواتير وعروض من 2026-06-01 فأكثر ── */
+  const confirmedInScope = clients.filter(c =>
+    isConfirmedSale(c) && dateOnly(c.created || c.updatedAt) >= FINANCE_START_DATE
+  );
+  /* المبلغ المحصّل فعلياً (paid) — لا إجمالي الفاتورة */
+  const actualIncome      = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
+  /* المتبقي غير المسدد */
+  const actualReceivables = confirmedInScope.reduce((s, c) => s + clientRemainingAmount(c), 0);
+  /* المصروفات فقط (نوع=مصروف) من approvedFinanceEntries المفلترة بـ FINANCE_START_DATE */
+  const totalExpenses     = approvedFinanceEntries()
+    .filter(e => e.type === 'مصروف')
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  const pendingQuotes     = clients.filter(isActiveFollowupQuote);
   const unbilledConfirmed = clients.filter(c => isConfirmedSale(c) && !isTaxInvoice(c));
-  const upcomingInstalls = clients.filter(c => daysUntil(c.installDate) !== null && daysUntil(c.installDate) >= 0).sort((a,b)=>new Date(a.installDate)-new Date(b.installDate)).slice(0,5);
-  const week = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
-  const draftCount = draftFinanceEntries().length;
-  const urgentStaff = staffDocs.filter(x => { const d = daysUntil(x.expires); return d !== null && d <= 15; });
-  const urgentVehicles = vehicles.filter(x => { const d = daysUntil(x.due); return d !== null && d <= 15; });
-  const kpi = [
-    ['دخل التأجير المؤكد', money(confirmedRevenue), '#5DCAA5'],
-    ['المتبقي للتحصيل', money(receivables), '#FAC775'],
-    ['عروض تحتاج متابعة', pendingQuotes.length, '#EF9F27'],
-    ['مصروفات 7 أيام', money(week.out), '#E24B4A']
+  const upcomingInstalls  = clients.filter(c => daysUntil(c.installDate) !== null && daysUntil(c.installDate) >= 0).sort((a,b)=>new Date(a.installDate)-new Date(b.installDate)).slice(0,5);
+  const draftCount        = draftFinanceEntries().length;
+  const urgentStaff       = staffDocs.filter(x => { const d = daysUntil(x.expires); return d !== null && d <= 15; });
+  const urgentVehicles    = vehicles.filter(x => { const d = daysUntil(x.due); return d !== null && d <= 15; });
+
+  /* بطاقات KPI الأربع الجديدة */
+  const kpiCards = [
+    {
+      label: 'الإيراد',
+      value: money(actualIncome),
+      sub: 'المحصّل فعلياً من الفواتير والعروض المؤكدة منذ ' + FINANCE_START_DATE,
+      color: 'var(--green)',
+      bg: 'var(--green-bg)',
+      icon: '💰'
+    },
+    {
+      label: 'المتبقي للتحصيل',
+      value: money(actualReceivables),
+      sub: 'المبالغ غير المسددة من الفواتير والعروض المؤكدة منذ ' + FINANCE_START_DATE,
+      color: actualReceivables > 0 ? 'var(--gold)' : 'var(--green)',
+      bg: actualReceivables > 0 ? 'var(--gold-bg)' : 'var(--green-bg)',
+      icon: '⏳'
+    },
+    {
+      label: 'إجمالي المصروفات',
+      value: money(totalExpenses),
+      sub: 'إجمالي المصروفات المسجلة منذ ' + FINANCE_START_DATE,
+      color: 'var(--red)',
+      bg: 'var(--red-bg)',
+      icon: '📤'
+    },
+    {
+      label: 'عروض تحتاج متابعة',
+      value: pendingQuotes.length,
+      sub: 'عروض أسعار نشطة لم تُؤكد بعد',
+      color: '#85B7EB',
+      bg: 'var(--navy-bg)',
+      icon: '📋'
+    }
   ];
   const row = (title, sub, badge) => `<div class="list-row"><div><div style="font-weight:600">${title}</div><div class="text-secondary" style="margin-top:3px">${sub}</div></div><div>${badge||''}</div></div>`;
   const urgentStaffItems = staffDocs
@@ -3994,7 +4035,16 @@ function renderExecutive() {
     </div>` : `<div style="background:var(--green-bg);border:1px solid var(--green);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:var(--green);font-weight:600">✅ لا توجد تنبيهات عاجلة خلال 15 يوم</div>`;
   el.innerHTML = `
     ${urgentAlertCard}
-    <div class="kpi-grid">${kpi.map(([l,v,c]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:20px;font-weight:700;color:${c}">${v}</div></div>`).join('')}</div>
+    <div class="kpi-grid" style="margin-bottom:14px">
+      ${kpiCards.map(k => `
+        <div style="background:${k.bg};border:1px solid ${k.color}33;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:12px;font-weight:600;color:${k.color};display:flex;align-items:center;gap:5px">
+            <span>${k.icon}</span><span>${k.label}</span>
+          </div>
+          <div style="font-size:22px;font-weight:800;color:var(--text);line-height:1.1">${k.value}</div>
+          <div style="font-size:11px;color:var(--text-3);line-height:1.4">${k.sub}</div>
+        </div>`).join('')}
+    </div>
     <div class="dashboard-grid">
       <div>
         <div class="section">
