@@ -1245,16 +1245,30 @@ const isChartAccountError = error => /الحساب المحاسبي|الترحي
 
 async function loadAppData() {
   const dbStatus = document.getElementById('db-status');
+  let data;
   try {
-    const data = await apiRequest('/bootstrap');
-    apiOnline = true;
+    data = await apiRequest('/bootstrap');
+  } catch(e) {
+    apiOnline = false;
+    if (dbStatus) {
+      dbStatus.textContent = 'وضع محلي - لم يتم ربط قاعدة البيانات';
+      dbStatus.style.color = '#FAC775';
+    }
+    console.warn('تعذر تحميل بيانات قاعدة البيانات', e);
+    showMsg('⚠️ يعمل النظام محلياً حتى يتم ربط قاعدة البيانات');
+    return;
+  }
+
+  apiOnline = true;
+  if (dbStatus) {
+    dbStatus.textContent = 'قاعدة البيانات متصلة';
+    dbStatus.style.color = '#5DCAA5';
+  }
+
+  try {
     if (data.currentUser) {
       currentUser = data.currentUser;
       try { localStorage.setItem('wk_current_user', JSON.stringify(currentUser)); } catch(e) {}
-    }
-    if (dbStatus) {
-      dbStatus.textContent = 'قاعدة البيانات متصلة';
-      dbStatus.style.color = '#5DCAA5';
     }
     if (data.settings?.daftra?.subdomain && data.settings?.daftra?.apikey) {
       cfg = normalizedCfg(data.settings.daftra);
@@ -1325,12 +1339,8 @@ async function loadAppData() {
     }
     showMsg('✅ قاعدة البيانات متصلة');
   } catch(e) {
-    apiOnline = false;
-    if (dbStatus) {
-      dbStatus.textContent = 'وضع محلي - لم يتم ربط قاعدة البيانات';
-      dbStatus.style.color = '#FAC775';
-    }
-    showMsg('⚠️ يعمل النظام محلياً حتى يتم ربط قاعدة البيانات');
+    console.warn('تم تحميل البيانات مع تعذر معالجة جزء فرعي', e);
+    showMsg('⚠️ تم تحميل البيانات، لكن تعذر تحديث جزء فرعي من الواجهة');
   }
 }
 function renderUserStatus() {
