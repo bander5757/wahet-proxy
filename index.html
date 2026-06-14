@@ -1784,9 +1784,18 @@ function roleLabel(role) {
 function userRole() {
   return currentUser?.role || 'guest';
 }
-function isBandar() {
-  return currentUser?.name === 'بندر' || currentUser?.email === 'bander@wkaimah.local';
+function isBander() {
+  if (!currentUser) return false;
+  return (
+    currentUser.role === 'owner' ||
+    currentUser.name === 'بندر' ||
+    currentUser.username === 'bander' ||
+    currentUser.email === 'bander@wkaimah.local'
+  );
 }
+/* backward-compat alias */
+function isBandar() { return isBander(); }
+
 function can(action) {
   const role = userRole();
   const rules = {
@@ -1799,7 +1808,7 @@ function can(action) {
     assetManage: ['owner', 'supervisor'],
     tenders: ['owner'],
   };
-  if (action === 'settings') return isBandar();
+  if (action === 'settings') return isBander();
   return (rules[action] || []).includes(role);
 }
 function applyPermissions() {

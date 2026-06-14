@@ -1752,7 +1752,17 @@ module.exports = async function handler(req, res) {
     }
 
     /* ─── Email endpoints ─── */
+    /* ── helper: owner-only guard ── */
+    const requireOwner = () => {
+      if (!user || user.role !== "owner") {
+        const err = new Error("غير مصرح — هذه الوظيفة لبندر فقط");
+        err.statusCode = 403;
+        throw err;
+      }
+    };
+
     if (req.method === "GET" && path === "/email/logs") {
+      requireOwner();
       await ensureEmailLogTable(client);
       const logs = await client.query(
         "select * from email_notification_logs order by created_at desc limit 200"
@@ -1761,6 +1771,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === "POST" && path === "/email/test") {
+      requireOwner();
       const targetUser = String(req.body?.user || "").trim();
       const prefs = await getNotificationPrefs(client);
       const cfg = prefs[targetUser];
@@ -1785,6 +1796,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === "POST" && path === "/users/update-notifications") {
+      requireOwner();
       const prefs = await getNotificationPrefs(client);
       const { userName, email, enabled, types } = req.body || {};
       if (!userName) return res.status(400).json({ ok: false, error: "userName مطلوب" });
@@ -1794,11 +1806,13 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === "GET" && path === "/users/notification-prefs") {
+      requireOwner();
       const prefs = await getNotificationPrefs(client);
       return res.status(200).json({ ok: true, data: prefs });
     }
 
     if (req.method === "POST" && path === "/email/check-payment-alerts") {
+      requireOwner();
       // Check confirmed quotes with install date in 2 days and remaining > 0
       await ensureEmailLogTable(client);
       const prefs = await getNotificationPrefs(client);
