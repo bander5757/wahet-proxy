@@ -936,6 +936,16 @@
   </div>
 </div>
 
+<div id="receivables-detail-modal" class="staff-modal-overlay" style="display:none" onclick="if(event.target===this)closeReceivablesDetail()">
+  <div class="staff-modal-box" style="width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column">
+    <div class="flex-between mb-8" style="flex-shrink:0">
+      <div class="staff-modal-title" style="margin-bottom:0">⏳ تفاصيل المتبقي للتحصيل</div>
+      <button class="btn-secondary" style="font-size:12px;min-height:32px" onclick="closeReceivablesDetail()">إغلاق</button>
+    </div>
+    <div id="receivables-detail-body" style="overflow-y:auto;flex:1;padding-top:4px"></div>
+  </div>
+</div>
+
 <div id="finance-log-modal" class="staff-modal-overlay" style="display:none" onclick="if(event.target===this)closeFinanceLogModal()">
   <div class="staff-modal-box" style="width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column">
     <div class="flex-between mb-8" style="flex-shrink:0">
@@ -1062,7 +1072,10 @@ vehicles = vehicles.map((x, i) => ({ id: x.id || 'vehicle_seed_' + i, ...x }));
 
 const daysUntil = d => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
 const daysOld   = d => d ? Math.floor((new Date() - new Date(d)) / 86400000) : null;
-const money = n => (Number(n) || 0).toLocaleString() + ' ر.س';
+const money = n => {
+  const val = Math.round((Number(n) || 0) * 100) / 100;
+  return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ر.س';
+};
 const FOLLOWUP_START_DATE = '2026-06-01';
 const dateOnly = value => value ? String(value).slice(0, 10) : '';
 const firstDate = (...values) => values.map(dateOnly).find(Boolean) || '';
@@ -2090,6 +2103,7 @@ async function syncDaftra() {
         stage: 'عرض_سعر', installDate: '', notes: '', assignedTo: '—',
         created, updatedAt, followupDate: updatedAt || created,
         source: 'daftra', daftraNo: est.no,
+        daftraDate: dateOnly(est.date), // تاريخ المستند الحقيقي من دفترة
         daftraDetails: daftraDetailsFrom(est, e)
         };
         applyInferredQuoteFields(card);
@@ -2124,6 +2138,7 @@ async function syncDaftra() {
         assignedTo: ex?.assignedTo || '—',
         created, updatedAt, followupDate: updatedAt || created,
         source: 'daftra', daftraNo: i.no,
+        daftraDate: dateOnly(i.date), // تاريخ الفاتورة الحقيقي من دفترة
         daftraDetails: daftraDetailsFrom(i, inv)
       };
       applyInferredQuoteFields(card);
@@ -3942,38 +3957,37 @@ function renderExecutive() {
   const el = document.getElementById('executive-dashboard');
   if (!el) return;
 
-  /* ── فلتر التاريخ: فواتير وعروض من 2026-06-01 فأكثر ──
-     نستخدم c.created فقط (تاريخ المستند الفعلي).
-     لا نستخدم updatedAt لأنه قد يكون تاريخ مزامنة حديث لمستند قديم. ── */
-  const confirmedInScope = clients.filter(c => {
-    if (!isConfirmedSale(c)) return false;
-    const docDate = dateOnly(c.created); // تاريخ الفاتورة/العرض فقط
-    return docDate && docDate >= FINANCE_START_DATE;
+  /* ── فلتر التاريخ — يستخدم تاريخ المستند الحقيقي من دفترة فقط ──
+     daftraDate = est.date أو i.date (تاريخ إصدار المستند).
+     لا يستخدم: updatedAt, created_at, تاريخ المزامنة.
+     للعملاء اليدويين: تاريخ الإضافة اليدوية (c.created). ── */
+  const _receivablesIncluded = [];
+  const _receivablesExcluded = [];
+
+  clients.forEach(c => {
+    const docDate = c.source === 'manual'
+      ? dateOnly(c.created)     // يدوي: تاريخ الإضافة
+      : (c.daftraDate || '');   // دفترة: est.date / i.date فقط
+
+    const reason = !isConfirmedSale(c)          ? 'غير مؤكد'
+      : !docDate                                 ? 'لا يوجد تاريخ مستند حقيقي'
+      : docDate < FINANCE_START_DATE             ? 'قبل تاريخ بداية الحساب'
+      : clientRemainingAmount(c) <= 0            ? 'لا يوجد متبقي'
+      : null;
+
+    if (!reason && isConfirmedSale(c)) {
+      _receivablesIncluded.push({ c, docDate });
+    } else if (reason) {
+      _receivablesExcluded.push({ c, docDate, reason });
+    }
   });
-  /* المبلغ المحصّل فعلياً (paid) — لا إجمالي الفاتورة */
+
+  const confirmedInScope  = _receivablesIncluded.map(x => x.c);
   const actualIncome      = confirmedInScope.reduce((s, c) => s + clientPaidAmount(c), 0);
-  /* المتبقي غير المسدد */
   const actualReceivables = confirmedInScope.reduce((s, c) => s + clientRemainingAmount(c), 0);
-  /* تشخيص — يظهر في console تفاصيل المستندات الداخلة في المتبقي */
-  if (isBander()) {
-    const receivableDetails = confirmedInScope
-      .filter(c => clientRemainingAmount(c) > 0)
-      .map(c => ({
-        نوع: isTaxInvoice(c) ? 'فاتورة' : 'عرض مؤكد',
-        رقم: c.daftraNo || c.id,
-        عميل: c.name,
-        تاريخ_المستند: dateOnly(c.created),
-        الإجمالي: clientTotalAmount(c),
-        المدفوع: clientPaidAmount(c),
-        المتبقي: clientRemainingAmount(c),
-      }));
-    console.group('📊 تفاصيل المتبقي للتحصيل (' + FINANCE_START_DATE + ' فأكثر)');
-    console.log('عدد المستندات في النطاق:', confirmedInScope.length);
-    console.log('منها لديها متبقي > 0:', receivableDetails.length);
-    console.table(receivableDetails);
-    console.log('إجمالي المتبقي:', actualReceivables);
-    console.groupEnd();
-  }
+
+  /* حفظ للـ modal */
+  window._kpiReceivablesData = { included: _receivablesIncluded, excluded: _receivablesExcluded, total: actualReceivables };
   /* المصروفات فقط (نوع=مصروف) من approvedFinanceEntries المفلترة بـ FINANCE_START_DATE */
   const totalExpenses     = approvedFinanceEntries()
     .filter(e => e.type === 'مصروف')
@@ -4060,10 +4074,11 @@ function renderExecutive() {
   el.innerHTML = `
     ${urgentAlertCard}
     <div class="kpi-grid" style="margin-bottom:14px">
-      ${kpiCards.map(k => `
+      ${kpiCards.map((k, i) => `
         <div style="background:${k.bg};border:1px solid ${k.color}33;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
-          <div style="font-size:12px;font-weight:600;color:${k.color};display:flex;align-items:center;gap:5px">
-            <span>${k.icon}</span><span>${k.label}</span>
+          <div style="font-size:12px;font-weight:600;color:${k.color};display:flex;align-items:center;justify-content:space-between">
+            <span style="display:flex;align-items:center;gap:5px"><span>${k.icon}</span><span>${k.label}</span></span>
+            ${i === 1 ? `<button onclick="openReceivablesDetail()" style="font-size:10px;padding:2px 8px;min-height:22px;background:transparent;border:1px solid ${k.color}88;border-radius:6px;color:${k.color};cursor:pointer">تفاصيل</button>` : ''}
           </div>
           <div style="font-size:22px;font-weight:800;color:var(--text);line-height:1.1">${k.value}</div>
           <div style="font-size:11px;color:var(--text-3);line-height:1.4">${k.sub}</div>
@@ -4140,6 +4155,73 @@ function renderRecentFinanceEntries() {
         </div>
       </div>`).join('')}
     </div>` : ''}`;
+}
+
+function openReceivablesDetail() {
+  const modal = document.getElementById('receivables-detail-modal');
+  if (!modal) return;
+  const data = window._kpiReceivablesData || { included: [], excluded: [], total: 0 };
+  const included = data.included;
+  const excluded = data.excluded;
+
+  const incRows = included.map(({ c, docDate }) => `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px">${htmlEscape(c.name)}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">
+            ${isTaxInvoice(c) ? '🧾 فاتورة' : '📋 عرض مؤكد'}
+            ${c.daftraNo ? ' · رقم ' + htmlEscape(c.daftraNo) : ''}
+            · تاريخ المستند: <b>${docDate || '—'}</b>
+            · حقل: <code style="font-size:10px">${c.source === 'manual' ? 'created' : 'daftraDate (est/inv.date)'}</code>
+          </div>
+        </div>
+        <div style="text-align:left;white-space:nowrap;font-size:12px">
+          <div>الإجمالي: <b>${money(clientTotalAmount(c))}</b></div>
+          <div>المدفوع: <span style="color:var(--green)">${money(clientPaidAmount(c))}</span></div>
+          <div>المتبقي: <span style="color:var(--gold);font-weight:700">${money(clientRemainingAmount(c))}</span></div>
+        </div>
+      </div>
+    </div>`).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px 0">لا توجد مستندات في النطاق</div>';
+
+  const excRows = excluded.slice(0, 20).map(({ c, docDate, reason }) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${htmlEscape(c.name)}</div>
+        <div style="font-size:10px;color:var(--text-3)">${isTaxInvoice(c)?'فاتورة':'عرض'} · ${docDate || 'بدون تاريخ'} · ${money(clientTotalAmount(c))}</div>
+      </div>
+      <span style="font-size:10px;background:var(--red-bg);color:var(--red);border-radius:6px;padding:2px 7px;white-space:nowrap">${reason}</span>
+    </div>`).join('') || '<div style="color:var(--text-3);font-size:12px;padding:8px 0">لا توجد مستندات مستبعدة</div>';
+
+  const beforeCutoff = excluded.filter(x => x.reason === 'قبل تاريخ بداية الحساب').length;
+  const noDate       = excluded.filter(x => x.reason === 'لا يوجد تاريخ مستند حقيقي').length;
+  const noRemaining  = excluded.filter(x => x.reason === 'لا يوجد متبقي').length;
+  const notConfirmed = excluded.filter(x => x.reason === 'غير مؤكد').length;
+
+  document.getElementById('receivables-detail-body').innerHTML = `
+    <div style="background:var(--navy-bg);border:1px solid var(--navy);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">📊 ملخص الحساب</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+        <div>تاريخ بداية الحساب:</div><div><b>${FINANCE_START_DATE}</b></div>
+        <div>مستندات داخل الحساب:</div><div><b style="color:var(--green)">${included.length}</b></div>
+        <div>إجمالي المتبقي:</div><div><b style="color:var(--gold)">${money(data.total)}</b></div>
+        <div>مستبعدة (قبل الفترة):</div><div><b style="color:var(--red)">${beforeCutoff}</b></div>
+        <div>مستبعدة (بدون تاريخ):</div><div><b style="color:var(--red)">${noDate}</b></div>
+        <div>مستبعدة (لا متبقي):</div><div><b>${noRemaining}</b></div>
+        <div>مستبعدة (غير مؤكد):</div><div><b>${notConfirmed}</b></div>
+      </div>
+    </div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px">✅ المستندات الداخلة في الحساب (${included.length})</div>
+    ${incRows}
+    <div style="font-size:13px;font-weight:700;margin:14px 0 8px">⛔ المستندات المستبعدة (آخر ${Math.min(excluded.length,20)} من ${excluded.length})</div>
+    ${excRows}`;
+
+  modal.style.display = 'flex';
+}
+
+function closeReceivablesDetail() {
+  const modal = document.getElementById('receivables-detail-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 function openFinanceLogModal() {
