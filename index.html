@@ -3998,11 +3998,25 @@ function renderExecutive() {
     }
   });
 
-  /* الإيراد = مدفوع دفترة من كل المؤكدين في النطاق + إيرادات يدوية معتمدة */
+  /*
+   * الإيراد:
+   * - للعملاء ذوي فاتورة ضريبية (isTaxInvoice): clientPaidAmount يقرأ من daftraDetails.totals.paid
+   *   → لا تقاطع مع financeEntries
+   * - للعروض المؤكدة (غير فاتورة): clientPaidAmount يقرأ من clientReceiptEntries (financeEntries)
+   *   → هذه المدخلات يجب إقصاؤها من manualIncome لمنع التكرار
+   */
+  const _usedReceiptIds = new Set();
+  _incomeScope.forEach(({ c }) => {
+    if (!isTaxInvoice(c)) {
+      clientReceiptEntries(c).forEach(e => _usedReceiptIds.add(e.id));
+    }
+  });
+
   const daftraIncome   = _incomeScope.reduce((s, { c }) => s + clientPaidAmount(c), 0);
-  const manualIncome   = approvedFinanceEntries()
-    .filter(e => e.type === 'إيراد')
-    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+  /* الإيرادات اليدوية المستقلة فقط — تستثني ما تم احتسابه عبر clientReceiptEntries */
+  const _manualEntries = approvedFinanceEntries().filter(e => e.type === 'إيراد' && !_usedReceiptIds.has(e.id));
+  const manualIncome   = _manualEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const actualIncome   = daftraIncome + manualIncome;
 
   /* المتبقي = فقط المستندات ذات remaining > 0 */
@@ -4022,6 +4036,8 @@ function renderExecutive() {
     total: actualReceivables,
     verify: {
       daftraIncomeCount: _incomeScope.length, daftraIncome,
+      manualIncomeCount: _manualEntries.length,
+      deduplicatedReceiptIds: [..._usedReceiptIds],
       manualIncome, actualIncome,
       expCount: _approvedExpEntries.length, totalExpenses,
       custodyCount: _custodyEntries.length, salaryCount: _salaryEntries.length,
