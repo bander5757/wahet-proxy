@@ -947,12 +947,25 @@
 </div>
 
 <div id="finance-log-modal" class="staff-modal-overlay" style="display:none" onclick="if(event.target===this)closeFinanceLogModal()">
-  <div class="staff-modal-box" style="width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column">
+  <div class="staff-modal-box" style="width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column">
     <div class="flex-between mb-8" style="flex-shrink:0">
       <div class="staff-modal-title" style="margin-bottom:0">📋 سجل العمليات الكامل</div>
       <button class="btn-secondary" style="font-size:12px;min-height:32px" onclick="closeFinanceLogModal()">إغلاق</button>
     </div>
+    <div id="finance-log-filters" style="flex-shrink:0;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
     <div id="finance-log-body" style="overflow-y:auto;flex:1;padding-top:4px"></div>
+  </div>
+</div>
+
+<!-- ─── Modal: سجل الحركات المحذوفة الكامل ─── -->
+<div id="finance-deleted-log-modal" class="staff-modal-overlay" style="display:none" onclick="if(event.target===this)closeDeletedLogModal()">
+  <div class="staff-modal-box" style="width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column">
+    <div class="flex-between mb-8" style="flex-shrink:0">
+      <div class="staff-modal-title" style="margin-bottom:0;color:var(--red)">🗑️ سجل الحركات المحذوفة الكامل</div>
+      <button class="btn-secondary" style="font-size:12px;min-height:32px" onclick="closeDeletedLogModal()">إغلاق</button>
+    </div>
+    <div id="finance-deleted-log-filters" style="flex-shrink:0;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px"></div>
+    <div id="finance-deleted-log-body" style="overflow-y:auto;flex:1;padding-top:4px"></div>
   </div>
 </div>
 
@@ -4207,8 +4220,26 @@ function financeEntryRow(e, opts = {}) {
 function renderRecentFinanceEntries() {
   const all = allFinanceEntries().slice().sort((a,b) => new Date(b.entry_date||b.created) - new Date(a.entry_date||a.created));
   const recent = all.slice(0, 5);
-  const deleted = deletedFinanceEntries();
   const moreCount = all.length - 5;
+  const deleted = deletedFinanceEntries().slice().sort((a,b) => new Date(b.deleted_at||b.created) - new Date(a.deleted_at||a.created));
+  const recentDel = deleted.slice(0, 5);
+  const moreDelCount = deleted.length - 5;
+
+  const deletedRows = recentDel.map(e => `
+    <div style="background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:9px 12px;margin-bottom:6px;opacity:.9">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px">${htmlEscape(e.type)} — ${money(e.amount)} <span style="font-size:10px;background:var(--red);color:#fff;border-radius:4px;padding:1px 6px">محذوف</span></div>
+          <div style="font-size:11px;color:var(--text-2);margin-top:3px">${htmlEscape(e.note||'')}${e.account?' · '+htmlEscape(e.account):''}${e.category?' · '+htmlEscape(e.category):''}</div>
+          <div style="font-size:10px;color:var(--text-3);margin-top:2px">التاريخ: ${dateOnly(e.entry_date||e.created)} · أنشأها: ${htmlEscape(e.createdBy||'—')}</div>
+        </div>
+        <div style="font-size:10px;color:var(--red);text-align:left;white-space:nowrap">
+          <div>حُذف: ${dateOnly(e.deleted_at||'')}</div>
+          <div>بواسطة: ${htmlEscape(e.deleted_by||'—')}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
   return `
     <div class="section" style="margin-top:12px">
       <div class="flex-between mb-8">
@@ -4219,15 +4250,11 @@ function renderRecentFinanceEntries() {
     </div>
     ${deleted.length ? `
     <div class="section" style="margin-top:10px">
-      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">📋 تقرير الحركات المحذوفة (${deleted.length})</div>
-      ${deleted.map(e => `<div class="list-row" style="opacity:.75">
-        <div style="min-width:0;flex:1">
-          <div style="font-weight:600">${htmlEscape(e.type)} — ${money(e.amount)} ${statusPill('محذوف','#b91c1c')}</div>
-          <div class="text-secondary" style="font-size:12px;margin-top:2px">${htmlEscape(e.note || '')} — ${dateOnly(e.entry_date||e.created)}</div>
-          ${e.createdBy ? `<div style="font-size:10px;color:var(--text-3)">أنشأها: ${htmlEscape(e.createdBy)}</div>` : ''}
-          <div style="font-size:10px;color:var(--red);margin-top:3px">حُذف بواسطة: ${htmlEscape(e.deleted_by||'—')} — ${dateOnly(e.deleted_at||'')} — السبب: ${htmlEscape(e.deletion_reason||'—')}</div>
-        </div>
-      </div>`).join('')}
+      <div class="flex-between mb-8">
+        <div style="font-size:13px;font-weight:700;color:var(--red)">🗑️ الحركات المحذوفة (${deleted.length})</div>
+        ${deleted.length > 5 ? `<button class="btn-secondary" style="font-size:12px;min-height:34px;color:var(--red);border-color:var(--red)" onclick="openDeletedLogModal()">عرض الكامل (${moreDelCount}+)</button>` : ''}
+      </div>
+      ${deletedRows}
     </div>` : ''}`;
 }
 
@@ -4298,21 +4325,192 @@ function closeReceivablesDetail() {
   if (modal) modal.style.display = 'none';
 }
 
+/* ─── Finance Log Modal ─── */
+const _flState = { page: 0, pageSize: 20, filters: {} };
+
+function _financeLogFiltered() {
+  const f = _flState.filters;
+  return allFinanceEntries()
+    .filter(e => {
+      const d = dateOnly(e.entry_date || e.created);
+      if (f.from && d < f.from) return false;
+      if (f.to   && d > f.to)   return false;
+      if (f.type && e.type !== f.type) return false;
+      if (f.account && (e.account || 'الحساب الرسمي') !== f.account) return false;
+      if (f.category && e.category !== f.category) return false;
+      if (f.user && (e.createdBy || '') !== f.user) return false;
+      if (f.onlyDeleted && !e.is_deleted) return false;
+      if (f.onlyActive && e.is_deleted) return false;
+      return true;
+    })
+    .sort((a,b) => new Date(b.entry_date||b.created) - new Date(a.entry_date||a.created));
+}
+
+function _renderFinanceLogFilters() {
+  const accounts = [...new Set(allFinanceEntries().map(e => e.account || 'الحساب الرسمي'))];
+  const categories = [...new Set(allFinanceEntries().map(e => e.category).filter(Boolean))];
+  const users = [...new Set(allFinanceEntries().map(e => e.createdBy).filter(Boolean))];
+  const types = ['إيراد','مصروف','عهدة','سلفة','دين','تحويل'];
+  const f = _flState.filters;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;font-size:12px">
+    <div><label style="font-size:11px;color:var(--text-3)">من تاريخ</label>
+      <input type="date" value="${f.from||''}" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.from=this.value;_flState.page=0;_renderFinanceLog()"></div>
+    <div><label style="font-size:11px;color:var(--text-3)">إلى تاريخ</label>
+      <input type="date" value="${f.to||''}" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.to=this.value;_flState.page=0;_renderFinanceLog()"></div>
+    <div><label style="font-size:11px;color:var(--text-3)">نوع العملية</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.type=this.value;_flState.page=0;_renderFinanceLog()">
+        <option value="">الكل</option>${types.map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">الحساب المالي</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.account=this.value;_flState.page=0;_renderFinanceLog()">
+        <option value="">الكل</option>${accounts.map(a=>`<option value="${htmlEscape(a)}" ${f.account===a?'selected':''}>${htmlEscape(a)}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">الحساب المحاسبي</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.category=this.value;_flState.page=0;_renderFinanceLog()">
+        <option value="">الكل</option>${categories.map(c=>`<option value="${htmlEscape(c)}" ${f.category===c?'selected':''}>${htmlEscape(c)}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">المستخدم</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_flState.filters.user=this.value;_flState.page=0;_renderFinanceLog()">
+        <option value="">الكل</option>${users.map(u=>`<option value="${htmlEscape(u)}" ${f.user===u?'selected':''}>${htmlEscape(u)}</option>`).join('')}</select></div>
+    <div style="display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+        <input type="checkbox" ${f.onlyDeleted?'checked':''} onchange="_flState.filters.onlyDeleted=this.checked;_flState.filters.onlyActive=false;_flState.page=0;_renderFinanceLog()"> محذوفة فقط</label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+        <input type="checkbox" ${f.onlyActive?'checked':''} onchange="_flState.filters.onlyActive=this.checked;_flState.filters.onlyDeleted=false;_flState.page=0;_renderFinanceLog()"> نشطة فقط</label>
+      <button class="btn-secondary" style="font-size:11px;min-height:28px;padding:4px 8px" onclick="_flState.filters={};_flState.page=0;openFinanceLogModal()">مسح الفلاتر</button>
+    </div>
+  </div>`;
+}
+
+function _renderFinanceLog() {
+  const filtered = _financeLogFiltered();
+  const start = 0;
+  const end = (_flState.page + 1) * _flState.pageSize;
+  const slice = filtered.slice(start, end);
+  const hasMore = filtered.length > end;
+  const body = document.getElementById('finance-log-body');
+  if (!body) return;
+  body.innerHTML = (slice.length
+    ? slice.map(e => financeEntryRow(e, { showDelete: !e.is_deleted })).join('')
+    : '<div class="text-secondary" style="padding:12px 0;font-size:13px">لا توجد نتائج</div>')
+    + (hasMore ? `<div style="text-align:center;padding:12px 0">
+        <button class="btn-secondary" style="min-height:38px;padding:8px 20px" onclick="_flState.page++;_renderFinanceLog()">
+          تحميل المزيد (${filtered.length - end} متبقية)
+        </button></div>` : '')
+    + `<div style="font-size:11px;color:var(--text-3);text-align:center;padding:8px 0">عرض ${Math.min(end,filtered.length)} من ${filtered.length} حركة</div>`;
+}
+
 function openFinanceLogModal() {
   const modal = document.getElementById('finance-log-modal');
   if (!modal) return;
-  const all = allFinanceEntries().slice().sort((a,b) => new Date(b.entry_date||b.created) - new Date(a.entry_date||a.created));
-  const body = document.getElementById('finance-log-body');
-  if (body) {
-    body.innerHTML = all.length
-      ? all.map(e => financeEntryRow(e, { showDelete: true })).join('')
-      : '<div class="text-secondary" style="padding:12px 0;font-size:13px">لا توجد حركات</div>';
-  }
+  _flState.page = 0;
+  const filtersEl = document.getElementById('finance-log-filters');
+  if (filtersEl) filtersEl.innerHTML = _renderFinanceLogFilters();
+  _renderFinanceLog();
   modal.style.display = 'flex';
 }
 
 function closeFinanceLogModal() {
   const modal = document.getElementById('finance-log-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+/* ─── Deleted Log Modal ─── */
+const _dlState = { page: 0, pageSize: 20, filters: {} };
+
+function _deletedLogFiltered() {
+  const f = _dlState.filters;
+  return deletedFinanceEntries()
+    .filter(e => {
+      const d = dateOnly(e.deleted_at || e.entry_date || e.created);
+      if (f.from && d < f.from) return false;
+      if (f.to   && d > f.to)   return false;
+      if (f.type && e.type !== f.type) return false;
+      if (f.account && (e.account || 'الحساب الرسمي') !== f.account) return false;
+      if (f.category && e.category !== f.category) return false;
+      if (f.deletedBy && (e.deleted_by || '') !== f.deletedBy) return false;
+      if (f.reason && !(e.deletion_reason || '').includes(f.reason)) return false;
+      return true;
+    })
+    .sort((a,b) => new Date(b.deleted_at||b.created) - new Date(a.deleted_at||a.created));
+}
+
+function _renderDeletedLogFilters() {
+  const dels = deletedFinanceEntries();
+  const accounts = [...new Set(dels.map(e => e.account || 'الحساب الرسمي'))];
+  const categories = [...new Set(dels.map(e => e.category).filter(Boolean))];
+  const deletedByList = [...new Set(dels.map(e => e.deleted_by).filter(Boolean))];
+  const types = ['إيراد','مصروف','عهدة','سلفة','دين','تحويل'];
+  const f = _dlState.filters;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;font-size:12px">
+    <div><label style="font-size:11px;color:var(--text-3)">من تاريخ الحذف</label>
+      <input type="date" value="${f.from||''}" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.from=this.value;_dlState.page=0;_renderDeletedLog()"></div>
+    <div><label style="font-size:11px;color:var(--text-3)">إلى تاريخ الحذف</label>
+      <input type="date" value="${f.to||''}" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.to=this.value;_dlState.page=0;_renderDeletedLog()"></div>
+    <div><label style="font-size:11px;color:var(--text-3)">نوع الحركة</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.type=this.value;_dlState.page=0;_renderDeletedLog()">
+        <option value="">الكل</option>${types.map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">الحساب المالي</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.account=this.value;_dlState.page=0;_renderDeletedLog()">
+        <option value="">الكل</option>${accounts.map(a=>`<option value="${htmlEscape(a)}" ${f.account===a?'selected':''}>${htmlEscape(a)}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">الحساب المحاسبي</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.category=this.value;_dlState.page=0;_renderDeletedLog()">
+        <option value="">الكل</option>${categories.map(c=>`<option value="${htmlEscape(c)}" ${f.category===c?'selected':''}>${htmlEscape(c)}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">من حذف الحركة</label>
+      <select style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" onchange="_dlState.filters.deletedBy=this.value;_dlState.page=0;_renderDeletedLog()">
+        <option value="">الكل</option>${deletedByList.map(u=>`<option value="${htmlEscape(u)}" ${f.deletedBy===u?'selected':''}>${htmlEscape(u)}</option>`).join('')}</select></div>
+    <div><label style="font-size:11px;color:var(--text-3)">سبب الحذف</label>
+      <input type="text" placeholder="ابحث..." value="${f.reason||''}" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px" oninput="_dlState.filters.reason=this.value;_dlState.page=0;_renderDeletedLog()"></div>
+    <div style="display:flex;align-items:flex-end">
+      <button class="btn-secondary" style="font-size:11px;min-height:28px;padding:4px 10px;width:100%" onclick="_dlState.filters={};_dlState.page=0;openDeletedLogModal()">مسح الفلاتر</button>
+    </div>
+  </div>`;
+}
+
+function _renderDeletedLog() {
+  const filtered = _deletedLogFiltered();
+  const end = (_dlState.page + 1) * _dlState.pageSize;
+  const slice = filtered.slice(0, end);
+  const hasMore = filtered.length > end;
+  const body = document.getElementById('finance-deleted-log-body');
+  if (!body) return;
+  body.innerHTML = (slice.length ? slice.map(e => `
+    <div style="background:var(--red-bg);border:1px solid var(--red);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px">${htmlEscape(e.type)} — ${money(e.amount)} <span style="font-size:10px;background:var(--red);color:#fff;border-radius:4px;padding:1px 6px">محذوف</span></div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:3px">${htmlEscape(e.note||e.statement||'—')}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:8px">
+            ${e.account ? `<span>💳 ${htmlEscape(e.account)}</span>` : ''}
+            ${e.category ? `<span>📂 ${htmlEscape(e.category)}</span>` : ''}
+            <span>📅 ${dateOnly(e.entry_date||e.created)}</span>
+            ${e.createdBy ? `<span>👤 أنشأها: ${htmlEscape(e.createdBy)}</span>` : ''}
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--red);text-align:left;min-width:120px">
+          <div style="font-weight:600">حُذف: ${dateOnly(e.deleted_at||'—')}</div>
+          <div>بواسطة: ${htmlEscape(e.deleted_by||'—')}</div>
+          ${e.deletion_reason ? `<div style="margin-top:2px;font-size:10px;color:var(--text-3)">السبب: ${htmlEscape(e.deletion_reason)}</div>` : ''}
+        </div>
+      </div>
+    </div>`).join('')
+    : '<div class="text-secondary" style="padding:12px 0;font-size:13px">لا توجد حركات محذوفة</div>')
+    + (hasMore ? `<div style="text-align:center;padding:12px 0">
+        <button class="btn-secondary" style="min-height:38px;padding:8px 20px;color:var(--red);border-color:var(--red)" onclick="_dlState.page++;_renderDeletedLog()">
+          تحميل المزيد (${filtered.length - end} متبقية)
+        </button></div>` : '')
+    + `<div style="font-size:11px;color:var(--text-3);text-align:center;padding:8px 0">عرض ${Math.min(end,filtered.length)} من ${filtered.length} حركة محذوفة</div>`;
+}
+
+function openDeletedLogModal() {
+  const modal = document.getElementById('finance-deleted-log-modal');
+  if (!modal) return;
+  _dlState.page = 0;
+  const filtersEl = document.getElementById('finance-deleted-log-filters');
+  if (filtersEl) filtersEl.innerHTML = _renderDeletedLogFilters();
+  _renderDeletedLog();
+  modal.style.display = 'flex';
+}
+
+function closeDeletedLogModal() {
+  const modal = document.getElementById('finance-deleted-log-modal');
   if (modal) modal.style.display = 'none';
 }
 
