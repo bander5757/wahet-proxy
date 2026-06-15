@@ -1647,8 +1647,31 @@ async function loadAppData() {
       setConfigSaveStatus('تم تحميل إعدادات دفترة من قاعدة البيانات');
     }
     if (Array.isArray(data.finance)) {
-      financeEntries = data.finance;
+      /* حفظ الحذوفات المحلية السابقة (قبل الكتابة فوقها بالبيانات من الخادم) */
+      const _localDeletedMap = {};
+      financeEntries.forEach(e => {
+        if (e.is_deleted) _localDeletedMap[e.id] = {
+          deleted_by: e.deleted_by, deletion_reason: e.deletion_reason, deleted_at: e.deleted_at
+        };
+      });
+      financeEntries = data.finance.map(e =>
+        _localDeletedMap[e.id] && !e.is_deleted
+          ? { ...e, is_deleted: true, ...(_localDeletedMap[e.id]) }
+          : e
+      );
       saveFinance();
+      /* مزامنة الحذوفات المحلية غير المنعكسة في الخادم */
+      const _pendingSync = Object.keys(_localDeletedMap).filter(id => !data.finance.find(e => e.id === id && e.is_deleted));
+      if (_pendingSync.length) {
+        _pendingSync.forEach(id => {
+          const meta = _localDeletedMap[id];
+          apiRequest('/finance/soft-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, deletedBy: meta.deleted_by || 'sync', deletionReason: meta.deletion_reason || 'مزامنة تلقائية' })
+          }).catch(() => {});
+        });
+      }
     }
     if (Array.isArray(data.staffDocs)) {
       staffDocs = data.staffDocs;
