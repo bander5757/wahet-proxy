@@ -7,6 +7,15 @@ function readLocalDatabaseUrl() {
   return env.match(/DATABASE_URL=(.*)/)?.[1]?.trim();
 }
 
+function normalizeDatabaseUrl(value) {
+  const url = String(value || "").trim();
+  const bracketPassword = url.match(/^(postgres(?:ql)?:\/\/[^:]+:)\[(.*)\]@(.+)$/);
+  if (bracketPassword) {
+    return bracketPassword[1] + encodeURIComponent(bracketPassword[2]) + "@" + bracketPassword[3];
+  }
+  return url;
+}
+
 function resolveProxyUrl(url) {
   const value = String(url || "").trim();
   if (!value) return "https://wahet-proxy.vercel.app/api/daftra";
@@ -64,12 +73,47 @@ function daftraDetailsFrom(record, wrapper) {
   };
 }
 
+function daftraExpenseFrom(wrapper) {
+  const expense = wrapper?.Expense || wrapper?.expense || wrapper || {};
+  return {
+    id: String(expense.id || ""),
+    code: expense.code || expense.no || expense.number || "",
+    amount: moneyNumber(expense.amount || expense.total || expense.summary_total),
+    currency: expense.currency_code || expense.currency || "SAR",
+    vendor: expense.vendor || expense.vendor_name || expense.supplier_name || "",
+    category: expense.category || expense.category_name || expense.expense_category || "",
+    date: firstDate(expense.date, expense.created_at, expense.created),
+    note: expense.note || expense.description || expense.notes || "",
+    account: expense.account_name || expense.treasury_name || expense.payment_account_name || "",
+    paymentMethod: expense.payment_method || expense.payment_method_name || "",
+    taxAmount: moneyNumber(expense.tax1_amount || expense.tax2_amount || expense.tax_amount || expense.vat_amount),
+    attachments: expense.attachments || expense.file || "",
+    raw: expense,
+  };
+}
+
+function daftraCustodyFrom(wrapper) {
+  const custody = wrapper?.EmployeeCustody || wrapper?.Custody || wrapper?.custody || wrapper || {};
+  return {
+    id: String(custody.id || ""),
+    code: custody.code || custody.no || custody.number || custody.custody_code || "",
+    employee: custody.employee_name || custody.staff_name || custody.user_name || custody.employee || "",
+    amount: moneyNumber(custody.amount || custody.total),
+    remaining: moneyNumber(custody.remaining_balance || custody.balance || custody.remaining || custody.due_amount),
+    status: custody.status || custody.state || "",
+    date: firstDate(custody.date, custody.created_at, custody.created),
+    dueDate: firstDate(custody.settlement_due_date, custody.due_date),
+    note: custody.description || custody.note || custody.notes || "",
+    raw: custody,
+  };
+}
+
 async function main() {
   const databaseUrl = readLocalDatabaseUrl();
   if (!databaseUrl) throw new Error("DATABASE_URL is missing");
 
   const pool = new Pool({
-    connectionString: databaseUrl,
+    connectionString: normalizeDatabaseUrl(databaseUrl),
     ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
   });
 
@@ -108,13 +152,33 @@ async function main() {
       return rows;
     }
 
-    const [estimates, invoices, statesResult] = await Promise.all([
+    async function fetchOptionalPages(base, label) {
+      try {
+        return { rows: await fetchPages(base), error: null, base, label };
+      } catch (err) {
+        return { rows: [], error: `${label}: ${err.message}`, base, label };
+      }
+    }
+
+    async function fetchFirstAvailable(candidates, label) {
+      const errors = [];
+      for (const base of candidates) {
+        const result = await fetchOptionalPages(base, label);
+        if (!result.error) return result;
+        errors.push(result.error);
+      }
+      return { rows: [], error: errors.join(" | "), base: candidates[0], label };
+    }
+
+    const [estimates, invoices, statesResult, expensesResult, custodiesResult] = await Promise.all([
       fetchPages("estimates"),
       fetchPages("invoices"),
       pool.query(`
         select local_key, quote_confirmed, tax_invoice_issued, stage, install_date::text, assigned_to, notes
         from daftra_quote_states
       `),
+      fetchOptionalPages("expenses", "المصروفات"),
+      fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
     ]);
 
     const states = Object.fromEntries(
@@ -234,12 +298,32 @@ async function main() {
       [JSON.stringify(cache)]
     );
 
+    const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
+    const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
+    const financeCache = {
+      expenses,
+      custodies,
+      syncedAt: new Date().toISOString(),
+      counts: { expenses: expenses.length, custodies: custodies.length },
+      errors: [expensesResult.error, custodiesResult.error].filter(Boolean),
+    };
+    await pool.query(
+      `insert into app_settings (key, value, updated_at)
+       values ('daftra_finance_cache', $1::jsonb, now())
+       on conflict (key)
+       do update set value = excluded.value, updated_at = now()`,
+      [JSON.stringify(financeCache)]
+    );
+
     console.log(
       JSON.stringify(
         {
           cached: merged.length,
           estimates: estimates.length,
           invoices: invoices.length,
+          expenses: expenses.length,
+          custodies: custodies.length,
+          financeErrors: financeCache.errors,
           first: merged[0]
             ? { id: merged[0].id, name: merged[0].name, created: merged[0].created, stage: merged[0].stage }
             : null,

@@ -481,6 +481,16 @@
       </div>
       <div id="bank-accounts-view"></div>
     </div>
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">بيانات دفترة المالية</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">قراءة من دفترة: المصروفات، ومحاولة جلب العهد إذا كان API يسمح بها</div>
+        </div>
+        <button class="btn-secondary" id="daftra-finance-sync-btn" onclick="syncDaftraFinance()">مزامنة مالية</button>
+      </div>
+      <div id="daftra-finance-view"></div>
+    </div>
     <div style="display:none" aria-hidden="true">
       <span id="accounting-guide-count"></span>
       <div id="accounting-guide-view"></div>
@@ -1038,6 +1048,8 @@ const dismissed  = new Set();
 let activeTab = 'home';
 let financeEntries = [];
 try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
+let daftraFinance = { expenses: [], custodies: [], syncedAt: null, counts: { expenses: 0, custodies: 0 }, errors: [] };
+try { daftraFinance = Object.assign(daftraFinance, JSON.parse(localStorage.getItem('wk_daftra_finance') || '{}')); } catch(e) {}
 let bankStatementRows = [];
 try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
 let bankStatementMeta = {};
@@ -1716,6 +1728,16 @@ async function loadAppData() {
         }
       }
     }
+    if (data.daftraFinance && typeof data.daftraFinance === 'object') {
+      daftraFinance = {
+        expenses: Array.isArray(data.daftraFinance.expenses) ? data.daftraFinance.expenses : [],
+        custodies: Array.isArray(data.daftraFinance.custodies) ? data.daftraFinance.custodies : [],
+        syncedAt: data.daftraFinance.syncedAt || null,
+        counts: data.daftraFinance.counts || { expenses: 0, custodies: 0 },
+        errors: Array.isArray(data.daftraFinance.errors) ? data.daftraFinance.errors : []
+      };
+      try { localStorage.setItem('wk_daftra_finance', JSON.stringify(daftraFinance)); } catch(e) {}
+    }
     if (data.bankStatement && Array.isArray(data.bankStatement.rows)) {
       bankStatementRows = data.bankStatement.rows;
       bankStatementMeta = {
@@ -2213,6 +2235,27 @@ async function syncDaftra() {
     showMsg('❌ فشل الاتصال: ' + err.message);
   }
   if (syncBtn) syncBtn.textContent = '🔄 مزامنة';
+}
+
+async function syncDaftraFinance() {
+  if (!apiOnline) { showMsg('⚠️ المزامنة المالية تحتاج اتصال قاعدة البيانات'); return; }
+  if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ إعدادات دفترة غير مكتملة'); return; }
+  const btn = document.getElementById('daftra-finance-sync-btn');
+  const oldText = btn?.textContent || 'مزامنة مالية';
+  if (btn) btn.textContent = 'جاري...';
+  showMsg('⏳ جاري سحب بيانات دفترة المالية...');
+  try {
+    const res = await apiRequest('/sync-daftra-cache', { method: 'POST', body: '{}' });
+    await loadAppData();
+    const counts = res.data?.financeCounts || daftraFinance.counts || {};
+    const errors = res.data?.financeErrors || daftraFinance.errors || [];
+    const msg = '✅ تمت المزامنة المالية — مصروفات: ' + (counts.expenses || 0) + '، عهد: ' + (counts.custodies || 0);
+    showMsg(errors.length ? msg + ' — توجد ملاحظات API' : msg);
+    renderFinance();
+  } catch(err) {
+    showMsg('❌ فشل سحب بيانات دفترة المالية: ' + err.message);
+  }
+  if (btn) btn.textContent = oldText;
 }
 
 async function loadDaftraRecordDetails(id) {
@@ -4258,6 +4301,60 @@ function renderRecentFinanceEntries() {
     </div>` : ''}`;
 }
 
+function renderDaftraFinanceSummary() {
+  const el = document.getElementById('daftra-finance-view');
+  if (!el) return;
+  const expenses = Array.isArray(daftraFinance.expenses) ? daftraFinance.expenses : [];
+  const custodies = Array.isArray(daftraFinance.custodies) ? daftraFinance.custodies : [];
+  const errors = Array.isArray(daftraFinance.errors) ? daftraFinance.errors : [];
+  const month = currentMonthKey();
+  const monthExpenses = expenses.filter(e => inMonth(e.date, month));
+  const expenseTotal = monthExpenses.reduce((sum, e) => sum + moneyValue(e.amount), 0);
+  const openCustodies = custodies.filter(c => {
+    const status = String(c.status || '').toLowerCase();
+    return !status || /open|مفتوح|مفتوحة|settled|مسو/.test(status);
+  });
+  const custodyRemaining = openCustodies.reduce((sum, c) => sum + moneyValue(c.remaining), 0);
+  const recentExpenses = expenses.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
+  const recentCustodies = custodies.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
+
+  el.innerHTML = `
+    <div class="grid-4">
+      <div class="stat-card"><div class="label">مصروفات دفترة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:#9A4A00">${money(expenseTotal)}</div></div>
+      <div class="stat-card"><div class="label">عدد مصروفات دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${expenses.length}</div></div>
+      <div class="stat-card"><div class="label">عهد دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${custodies.length}</div></div>
+      <div class="stat-card"><div class="label">متبقي عهد دفترة</div><div style="font-size:18px;font-weight:800;color:${custodyRemaining ? 'var(--red)' : 'var(--green)'}">${money(custodyRemaining)}</div></div>
+    </div>
+    <div class="text-secondary" style="font-size:11px;margin-top:8px">
+      آخر سحب مالي: ${daftraFinance.syncedAt ? new Date(daftraFinance.syncedAt).toLocaleString('ar-SA') : 'لم يتم السحب بعد'}
+    </div>
+    ${errors.length ? `<div style="background:var(--gold-bg);border:1px solid var(--gold);border-radius:8px;padding:9px 10px;margin-top:8px;color:#4F3300;font-size:12px;line-height:1.7">
+      ${errors.map(e => `<div>${htmlEscape(e)}</div>`).join('')}
+    </div>` : ''}
+    <div class="grid-2 mt-8">
+      <div class="stat-card">
+        <div class="label">آخر مصروفات دفترة</div>
+        ${recentExpenses.length ? recentExpenses.map(e => `<div class="list-row">
+          <div style="min-width:0">
+            <div style="font-weight:700">${money(e.amount)} — ${htmlEscape(e.category || e.vendor || 'مصروف')}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(e.note || e.vendor || '')}${e.account ? ' — ' + htmlEscape(e.account) : ''}</div>
+          </div>
+          <div class="text-secondary" style="white-space:nowrap">${dateOnly(e.date)}</div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات مسحوبة من دفترة</div>'}
+      </div>
+      <div class="stat-card">
+        <div class="label">عهد دفترة</div>
+        ${recentCustodies.length ? recentCustodies.map(c => `<div class="list-row">
+          <div style="min-width:0">
+            <div style="font-weight:700">${htmlEscape(c.employee || 'موظف')} — ${money(c.amount)}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">المتبقي: ${money(c.remaining)}${c.status ? ' — ' + htmlEscape(c.status) : ''}</div>
+          </div>
+          <div class="text-secondary" style="white-space:nowrap">${dateOnly(c.date)}</div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لم يرجع API دفترة عهد حتى الآن</div>'}
+      </div>
+    </div>`;
+}
+
 function openReceivablesDetail() {
   const modal = document.getElementById('receivables-detail-modal');
   if (!modal) return;
@@ -4532,6 +4629,7 @@ function renderFinance() {
   ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:18px;font-weight:700;color:${t==='success'?'#5DCAA5':t==='warning'?'#FAC775':t==='danger'?'#E24B4A':'#85B7EB'}">${v}</div></div>`).join('');
   renderBankAccounts();
   renderAccountingGuide();
+  renderDaftraFinanceSummary();
   const list = document.getElementById('finance-list');
   if (list) list.innerHTML = `
     ${renderMonthlyFinanceTables()}

@@ -163,13 +163,22 @@ const RADAR_CONDITIONAL_NEGATIVE = [
 
 let pool;
 
+function normalizeDatabaseUrl(value) {
+  const url = String(value || "").trim();
+  const bracketPassword = url.match(/^(postgres(?:ql)?:\/\/[^:]+:)\[(.*)\]@(.+)$/);
+  if (bracketPassword) {
+    return bracketPassword[1] + encodeURIComponent(bracketPassword[2]) + "@" + bracketPassword[3];
+  }
+  return url;
+}
+
 function getPool() {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is not configured");
   }
   if (!pool) {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: normalizeDatabaseUrl(process.env.DATABASE_URL),
       ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false },
     });
   }
@@ -245,6 +254,41 @@ function daftraDetailsFrom(record, wrapper) {
       balance: record.balance || record.due_amount || record.remaining || wrapper?.balance || "",
     },
     items: daftraItemsFrom(record, wrapper),
+  };
+}
+
+function daftraExpenseFrom(wrapper) {
+  const expense = wrapper?.Expense || wrapper?.expense || wrapper || {};
+  return {
+    id: String(expense.id || ""),
+    code: expense.code || expense.no || expense.number || "",
+    amount: moneyNumber(expense.amount || expense.total || expense.summary_total),
+    currency: expense.currency_code || expense.currency || "SAR",
+    vendor: expense.vendor || expense.vendor_name || expense.supplier_name || "",
+    category: expense.category || expense.category_name || expense.expense_category || "",
+    date: firstDate(expense.date, expense.created_at, expense.created),
+    note: expense.note || expense.description || expense.notes || "",
+    account: expense.account_name || expense.treasury_name || expense.payment_account_name || "",
+    paymentMethod: expense.payment_method || expense.payment_method_name || "",
+    taxAmount: moneyNumber(expense.tax1_amount || expense.tax2_amount || expense.tax_amount || expense.vat_amount),
+    attachments: expense.attachments || expense.file || "",
+    raw: expense,
+  };
+}
+
+function daftraCustodyFrom(wrapper) {
+  const custody = wrapper?.EmployeeCustody || wrapper?.Custody || wrapper?.custody || wrapper || {};
+  return {
+    id: String(custody.id || ""),
+    code: custody.code || custody.no || custody.number || custody.custody_code || "",
+    employee: custody.employee_name || custody.staff_name || custody.user_name || custody.employee || "",
+    amount: moneyNumber(custody.amount || custody.total),
+    remaining: moneyNumber(custody.remaining_balance || custody.balance || custody.remaining || custody.due_amount),
+    status: custody.status || custody.state || "",
+    date: firstDate(custody.date, custody.created_at, custody.created),
+    dueDate: firstDate(custody.settlement_due_date, custody.due_date),
+    note: custody.description || custody.note || custody.notes || "",
+    raw: custody,
   };
 }
 
@@ -1166,6 +1210,35 @@ async function setDaftraClientsCache(client, payload) {
   return setSetting(client, "daftra_clients_cache", cache);
 }
 
+async function getDaftraFinanceCache(client) {
+  const cache = await getSetting(client, "daftra_finance_cache");
+  if (!cache || typeof cache !== "object") {
+    return { expenses: [], custodies: [], syncedAt: null, counts: { expenses: 0, custodies: 0 }, errors: [] };
+  }
+  return {
+    expenses: Array.isArray(cache.expenses) ? cache.expenses : [],
+    custodies: Array.isArray(cache.custodies) ? cache.custodies : [],
+    syncedAt: cache.syncedAt || null,
+    counts: cache.counts || { expenses: 0, custodies: 0 },
+    errors: Array.isArray(cache.errors) ? cache.errors : [],
+  };
+}
+
+async function setDaftraFinanceCache(client, payload) {
+  const counts = payload.counts && typeof payload.counts === "object" ? payload.counts : {};
+  const cache = {
+    expenses: Array.isArray(payload.expenses) ? payload.expenses.slice(0, 2000) : [],
+    custodies: Array.isArray(payload.custodies) ? payload.custodies.slice(0, 1000) : [],
+    syncedAt: payload.syncedAt || new Date().toISOString(),
+    counts: {
+      expenses: Number(counts.expenses) || 0,
+      custodies: Number(counts.custodies) || 0,
+    },
+    errors: Array.isArray(payload.errors) ? payload.errors.slice(0, 20) : [],
+  };
+  return setSetting(client, "daftra_finance_cache", cache);
+}
+
 async function getBankStatementCache(client) {
   const cache = await getSetting(client, "bank_statement_cache");
   if (!cache || !Array.isArray(cache.rows)) {
@@ -1248,10 +1321,30 @@ async function syncDaftraClientsCache(client) {
     return rows;
   }
 
-  const [estimates, invoices, quoteStates] = await Promise.all([
+  async function fetchOptionalPages(base, label) {
+    try {
+      return { rows: await fetchPages(base), error: null, base, label };
+    } catch (err) {
+      return { rows: [], error: `${label}: ${err.message}`, base, label };
+    }
+  }
+
+  async function fetchFirstAvailable(candidates, label) {
+    const errors = [];
+    for (const base of candidates) {
+      const result = await fetchOptionalPages(base, label);
+      if (!result.error) return result;
+      errors.push(result.error);
+    }
+    return { rows: [], error: errors.join(" | "), base: candidates[0], label };
+  }
+
+  const [estimates, invoices, quoteStates, expensesResult, custodiesResult] = await Promise.all([
     fetchPages("estimates"),
     fetchPages("invoices"),
     listQuoteStates(client),
+    fetchOptionalPages("expenses", "المصروفات"),
+    fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
   ]);
   const merged = [];
 
@@ -1347,11 +1440,27 @@ async function syncDaftraClientsCache(client) {
     else merged.push(card);
   });
 
-  return setDaftraClientsCache(client, {
+  const clientsCache = await setDaftraClientsCache(client, {
     clients: merged,
     syncedAt: new Date().toISOString(),
     counts: { estimates: estimates.length, invoices: invoices.length },
   });
+
+  const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
+  const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
+  const financeErrors = [expensesResult.error, custodiesResult.error].filter(Boolean);
+  const financeCache = await setDaftraFinanceCache(client, {
+    expenses,
+    custodies,
+    syncedAt: new Date().toISOString(),
+    counts: { expenses: expenses.length, custodies: custodies.length },
+    errors: financeErrors,
+  });
+
+  return {
+    ...clientsCache,
+    finance: financeCache,
+  };
 }
 
 function validateDaftraSettings(payload) {
@@ -1537,6 +1646,7 @@ async function dashboard(client, user) {
   const tenders = await listTenders(client);
   const daftraSettings = await getSetting(client, "daftra");
   const daftraClientsCache = await getDaftraClientsCache(client);
+  const daftraFinanceCache = await getDaftraFinanceCache(client);
   const bankStatement = await getBankStatementCache(client);
   const financeMeta = await getFinanceMeta(client);
   const chartAccounts = await listChartAccounts(client);
@@ -1556,7 +1666,11 @@ async function dashboard(client, user) {
     daftraSync: {
       syncedAt: daftraClientsCache.syncedAt,
       counts: daftraClientsCache.counts,
+      financeSyncedAt: daftraFinanceCache.syncedAt,
+      financeCounts: daftraFinanceCache.counts,
+      financeErrors: daftraFinanceCache.errors,
     },
+    daftraFinance: daftraFinanceCache,
     bankStatement,
     financeMeta,
     chartAccounts,
@@ -1697,6 +1811,9 @@ module.exports = async function handler(req, res) {
           syncedAt: saved.syncedAt,
           counts: saved.counts,
           clientsCount: Array.isArray(saved.clients) ? saved.clients.length : 0,
+          financeSyncedAt: saved.finance?.syncedAt || null,
+          financeCounts: saved.finance?.counts || { expenses: 0, custodies: 0 },
+          financeErrors: saved.finance?.errors || [],
         },
       });
     }
