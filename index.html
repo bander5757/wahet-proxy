@@ -328,7 +328,7 @@
     <button class="btn-secondary" data-mobile-hide="true" style="position:relative" onclick="toggleNotif()">
       🔔 <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#E24B4A;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center">0</span>
     </button>
-    <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
+    <button class="btn-green" data-action="quickEntry" style="display:none" onclick="openQuickEntry()">+ حركة</button>
     <button class="btn-primary" data-action="addClient" data-mobile-hide="true" onclick="toggleAdd()">+ يدوي</button>
   </div>
 </div>
@@ -465,17 +465,16 @@
   <div class="section">
     <div class="flex-between mb-12">
       <div>
-        <div style="font-size:15px;font-weight:600">المحاسبة اليومية</div>
-        <div style="font-size:11px;color:#9a9898;margin-top:2px">مصروفات، عهد، إيرادات، سلف، وديون</div>
+          <div style="font-size:15px;font-weight:600">محاسبة دفترة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">قراءة المصروفات والعهد والأرصدة من دفترة، مع دفعات داخلية للعروض غير الضريبية فقط</div>
       </div>
-      <button class="btn-green" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
     </div>
     <div id="finance-summary" class="grid-4"></div>
     <div id="bank-accounts-section" class="section" style="margin-top:12px;display:none">
       <div class="flex-between mb-12">
         <div>
           <div style="font-size:15px;font-weight:600">الحسابات البنكية</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">الأرصدة محسوبة من الرصيد الابتدائي والحركات المعتمدة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">حساب المؤسسة يُقرأ من دفترة، وحساب ابو فايز وحساب فيصل تُحسب عليها دفعات العروض غير الضريبية</div>
         </div>
         <button class="btn-secondary" onclick="addBankAccount()">+ حساب</button>
       </div>
@@ -485,7 +484,7 @@
       <div class="flex-between mb-12">
         <div>
           <div style="font-size:15px;font-weight:600">بيانات دفترة المالية</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">قراءة من دفترة: المصروفات، ومحاولة جلب العهد إذا كان API يسمح بها</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">قراءة مباشرة من دفترة: المصروفات، العهد، والمدفوعات/الأرصدة عند توفرها من API</div>
         </div>
         <button class="btn-secondary" id="daftra-finance-sync-btn" onclick="syncDaftraFinance()">مزامنة مالية</button>
       </div>
@@ -494,44 +493,6 @@
     <div style="display:none" aria-hidden="true">
       <span id="accounting-guide-count"></span>
       <div id="accounting-guide-view"></div>
-    </div>
-    <div class="section" style="margin-top:12px">
-      <div class="flex-between mb-12">
-        <div>
-          <div style="font-size:15px;font-weight:600">إضافة من الواتساب</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">تحويل رسالة أو صوت واتساب إلى مسودة مالية للمراجعة</div>
-        </div>
-      </div>
-      <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
-        <button id="wa-mode-text" class="btn-primary" onclick="setWhatsappEntryMode('text')">نص</button>
-        <button id="wa-mode-voice" class="btn-secondary" onclick="setWhatsappEntryMode('voice')">صوت</button>
-      </div>
-      <div id="wa-voice-tools" class="grid-2" style="display:none;margin-bottom:10px">
-        <div>
-          <div class="label">ملف صوت واتساب</div>
-          <input id="wa-audio-file" type="file" accept="audio/*">
-        </div>
-        <div>
-          <div class="label">إملاء صوتي مباشر</div>
-          <button class="btn-secondary" style="width:100%;font-size:20px;line-height:1"
-            onmousedown="startWhatsappDictation()" onmouseup="stopWhatsappDictation()" onmouseleave="stopWhatsappDictation()"
-            ontouchstart="event.preventDefault();startWhatsappDictation()" ontouchend="event.preventDefault();stopWhatsappDictation()"
-            title="اضغط واستمر للتحدث">🎙️</button>
-        </div>
-      </div>
-      <div>
-        <div class="label" id="wa-text-label">انسخ من واتساب والصق هنا</div>
-        <textarea id="wa-entry-text" rows="4" placeholder="مثال: حولت لعمر 500 ريال عهدة تركيب خيمة في العليا"></textarea>
-      </div>
-      <div class="grid-2 mt-8">
-        <div><div class="label">من أي حساب</div><select id="wa-entry-account"></select></div>
-        <div><div class="label">الحساب المحاسبي عند الحاجة</div><select id="wa-entry-category" onchange="warnDuplicateChartAccount(this.value)"></select></div>
-      </div>
-      <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
-        <button class="btn-secondary" onclick="previewWhatsappEntry()">تحليل الرسالة</button>
-        <button class="btn-green" onclick="saveWhatsappDraft()">إنشاء مسودة</button>
-      </div>
-      <div id="wa-entry-preview" class="mt-8"></div>
     </div>
     <div class="section" style="margin-top:12px">
       <div class="flex-between mb-12">
@@ -1048,7 +1009,7 @@ const dismissed  = new Set();
 let activeTab = 'home';
 let financeEntries = [];
 try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
-let daftraFinance = { expenses: [], custodies: [], syncedAt: null, counts: { expenses: 0, custodies: 0 }, errors: [] };
+let daftraFinance = { expenses: [], custodies: [], payments: [], accounts: [], syncedAt: null, counts: { expenses: 0, custodies: 0, payments: 0, accounts: 0 }, errors: [] };
 try { daftraFinance = Object.assign(daftraFinance, JSON.parse(localStorage.getItem('wk_daftra_finance') || '{}')); } catch(e) {}
 let bankStatementRows = [];
 try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
@@ -1757,8 +1718,10 @@ async function loadAppData() {
       daftraFinance = {
         expenses: Array.isArray(data.daftraFinance.expenses) ? data.daftraFinance.expenses : [],
         custodies: Array.isArray(data.daftraFinance.custodies) ? data.daftraFinance.custodies : [],
+        payments: Array.isArray(data.daftraFinance.payments) ? data.daftraFinance.payments : [],
+        accounts: Array.isArray(data.daftraFinance.accounts) ? data.daftraFinance.accounts : [],
         syncedAt: data.daftraFinance.syncedAt || null,
-        counts: data.daftraFinance.counts || { expenses: 0, custodies: 0 },
+        counts: data.daftraFinance.counts || { expenses: 0, custodies: 0, payments: 0, accounts: 0 },
         errors: Array.isArray(data.daftraFinance.errors) ? data.daftraFinance.errors : []
       };
       try { localStorage.setItem('wk_daftra_finance', JSON.stringify(daftraFinance)); } catch(e) {}
@@ -1912,7 +1875,7 @@ function can(action) {
   const rules = {
     sync: ['owner', 'accountant'],
     addClient: ['owner', 'supervisor'],
-    quickEntry: ['owner', 'viewer', 'supervisor', 'accountant'],
+    quickEntry: [],
     approveFinance: ['owner', 'accountant', 'viewer'],
     finance: ['owner', 'viewer', 'supervisor', 'accountant'],
     bankAccounts: ['owner', 'viewer', 'accountant'],
@@ -2274,7 +2237,7 @@ async function syncDaftraFinance() {
     await loadAppData();
     const counts = res.data?.financeCounts || daftraFinance.counts || {};
     const errors = res.data?.financeErrors || daftraFinance.errors || [];
-    const msg = '✅ تمت المزامنة المالية — مصروفات: ' + (counts.expenses || 0) + '، عهد: ' + (counts.custodies || 0);
+    const msg = '✅ تمت المزامنة المالية — مصروفات: ' + (counts.expenses || 0) + '، عهد: ' + (counts.custodies || 0) + '، مدفوعات: ' + (counts.payments || 0) + '، أرصدة: ' + (counts.accounts || 0);
     showMsg(errors.length ? msg + ' — توجد ملاحظات API' : msg);
     renderFinance();
   } catch(err) {
@@ -4339,10 +4302,15 @@ function renderDaftraFinanceSummary() {
   if (!el) return;
   const expenses = Array.isArray(daftraFinance.expenses) ? daftraFinance.expenses : [];
   const custodies = Array.isArray(daftraFinance.custodies) ? daftraFinance.custodies : [];
+  const payments = Array.isArray(daftraFinance.payments) ? daftraFinance.payments : [];
+  const accounts = Array.isArray(daftraFinance.accounts) ? daftraFinance.accounts : [];
   const errors = Array.isArray(daftraFinance.errors) ? daftraFinance.errors : [];
   const month = currentMonthKey();
   const monthExpenses = expenses.filter(e => inMonth(e.date, month));
   const expenseTotal = monthExpenses.reduce((sum, e) => sum + moneyValue(e.amount), 0);
+  const monthPayments = payments.filter(e => inMonth(e.date, month));
+  const paymentsTotal = monthPayments.reduce((sum, e) => sum + moneyValue(e.amount), 0);
+  const officialBalance = accounts.reduce((sum, a) => sum + moneyValue(a.balance), 0);
   const openCustodies = custodies.filter(c => {
     const status = String(c.status || '').toLowerCase();
     return !status || /open|مفتوح|مفتوحة|settled|مسو/.test(status);
@@ -4350,16 +4318,17 @@ function renderDaftraFinanceSummary() {
   const custodyRemaining = openCustodies.reduce((sum, c) => sum + moneyValue(c.remaining), 0);
   const recentExpenses = expenses.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
   const recentCustodies = custodies.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
+  const recentPayments = payments.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
 
   el.innerHTML = `
     <div class="grid-4">
       <div class="stat-card"><div class="label">مصروفات دفترة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:#9A4A00">${money(expenseTotal)}</div></div>
-      <div class="stat-card"><div class="label">عدد مصروفات دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${expenses.length}</div></div>
-      <div class="stat-card"><div class="label">عهد دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${custodies.length}</div></div>
+      <div class="stat-card"><div class="label">مدفوعات دفترة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:var(--green)">${money(paymentsTotal)}</div></div>
+      <div class="stat-card"><div class="label">أرصدة دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${accounts.length ? money(officialBalance) : 'غير متاح'}</div></div>
       <div class="stat-card"><div class="label">متبقي عهد دفترة</div><div style="font-size:18px;font-weight:800;color:${custodyRemaining ? 'var(--red)' : 'var(--green)'}">${money(custodyRemaining)}</div></div>
     </div>
     <div class="text-secondary" style="font-size:11px;margin-top:8px">
-      آخر سحب مالي: ${daftraFinance.syncedAt ? new Date(daftraFinance.syncedAt).toLocaleString('ar-SA') : 'لم يتم السحب بعد'}
+      آخر سحب مالي: ${daftraFinance.syncedAt ? new Date(daftraFinance.syncedAt).toLocaleString('ar-SA') : 'لم يتم السحب بعد'} — السجلات: ${expenses.length} مصروف، ${custodies.length} عهدة، ${payments.length} دفعة، ${accounts.length} رصيد
     </div>
     ${errors.length ? `<div style="background:var(--gold-bg);border:1px solid var(--gold);border-radius:8px;padding:9px 10px;margin-top:8px;color:#4F3300;font-size:12px;line-height:1.7">
       ${errors.map(e => `<div>${htmlEscape(e)}</div>`).join('')}
@@ -4376,6 +4345,16 @@ function renderDaftraFinanceSummary() {
         </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات مسحوبة من دفترة</div>'}
       </div>
       <div class="stat-card">
+        <div class="label">آخر مدفوعات دفترة</div>
+        ${recentPayments.length ? recentPayments.map(p => `<div class="list-row">
+          <div style="min-width:0">
+            <div style="font-weight:700">${money(p.amount)} — ${htmlEscape(p.client || p.method || 'دفعة')}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(p.account || '')}${p.code ? ' — #' + htmlEscape(p.code) : ''}</div>
+          </div>
+          <div class="text-secondary" style="white-space:nowrap">${dateOnly(p.date)}</div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لم يرجع API دفترة مدفوعات مستقلة حتى الآن</div>'}
+      </div>
+      <div class="stat-card">
         <div class="label">عهد دفترة</div>
         ${recentCustodies.length ? recentCustodies.map(c => `<div class="list-row">
           <div style="min-width:0">
@@ -4384,6 +4363,54 @@ function renderDaftraFinanceSummary() {
           </div>
           <div class="text-secondary" style="white-space:nowrap">${dateOnly(c.date)}</div>
         </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لم يرجع API دفترة عهد حتى الآن</div>'}
+      </div>
+      <div class="stat-card">
+        <div class="label">أرصدة/خزائن دفترة</div>
+        ${accounts.length ? accounts.map(a => `<div class="list-row">
+          <div style="min-width:0">
+            <div style="font-weight:700">${htmlEscape(a.name || 'حساب')} — ${money(a.balance)}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(a.type || '')}${a.code ? ' — ' + htmlEscape(a.code) : ''}</div>
+          </div>
+          <div class="text-secondary" style="white-space:nowrap">${htmlEscape(a.currency || 'SAR')}</div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لم يرجع API دفترة أرصدة أو خزائن حتى الآن</div>'}
+      </div>
+    </div>`;
+}
+
+function nonTaxReceiptEntries() {
+  const allowed = new Set(nonTaxReceiptAccounts().map(a => a.name));
+  return approvedFinanceEntries().filter(e => e.type === 'إيراد' && allowed.has(e.account || ''));
+}
+
+function renderInternalNonTaxReceipts() {
+  const rows = nonTaxReceiptEntries().slice().sort((a,b) => new Date(b.created || 0) - new Date(a.created || 0));
+  const totalsByAccount = nonTaxReceiptAccounts().map(account => ({
+    account,
+    total: rows.filter(e => e.account === account.name).reduce((sum, e) => sum + moneyValue(e.amount), 0)
+  }));
+  return `
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:15px;font-weight:600">دفعات العروض المؤكدة بدون ضريبة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">هذا هو الإدخال المالي الوحيد داخل اللوحة، وباقي المصروفات والعهد من دفترة</div>
+        </div>
+        ${statusPill(rows.length + ' دفعة', '#85B7EB')}
+      </div>
+      <div class="grid-2">
+        ${totalsByAccount.map(x => `<div class="stat-card">
+          <div class="label">${htmlEscape(x.account.name)}</div>
+          <div style="font-size:19px;font-weight:800;color:var(--green)">${money(x.total)}</div>
+        </div>`).join('')}
+      </div>
+      <div class="mt-8">
+        ${rows.length ? rows.slice(0, 10).map(e => `<div class="list-row">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:700">${money(e.amount)} — ${htmlEscape(e.person || 'عميل')}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(e.account || '')} — ${dateOnly(e.created)}</div>
+            <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(e.note || '')}</div>
+          </div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد دفعات داخلية مسجلة لعروض غير ضريبية</div>'}
       </div>
     </div>`;
 }
@@ -4647,31 +4674,26 @@ function closeDeletedLogModal() {
 function renderFinance() {
   normalizeBankAccounts();
   refreshAccountingCategorySelects();
-  const approved = approvedFinanceEntries();
-  const drafts = draftFinanceEntries();
-  const sum = financeTotals(approved);
-  const allSum = financeTotals();
-  const week = financeTotals(periodEntries(7).filter(e => e.status === 'approved'));
-  const openCustody = approved.filter(e => e.type === 'عهدة').reduce((total, e) => total + custodyRemaining(e), 0);
+  const expenses = Array.isArray(daftraFinance.expenses) ? daftraFinance.expenses : [];
+  const custodies = Array.isArray(daftraFinance.custodies) ? daftraFinance.custodies : [];
+  const month = currentMonthKey();
+  const monthExpenseTotal = expenses.filter(e => inMonth(e.date, month)).reduce((sum, e) => sum + moneyValue(e.amount), 0);
+  const internalReceipts = nonTaxReceiptEntries();
+  const internalReceiptTotal = internalReceipts.reduce((sum, e) => sum + moneyValue(e.amount), 0);
+  const openCustodyTotal = custodies.reduce((sum, c) => sum + moneyValue(c.remaining), 0);
   const summary = document.getElementById('finance-summary');
   if (summary) summary.innerHTML = [
-    ['إيرادات معتمدة', money(sum.income), 'success'],
-    ['مصروفات معتمدة', money(sum.out), 'warning'],
-    ['مسودات تحتاج اعتماد', drafts.length, 'danger'],
-    ['عهد مفتوحة', money(openCustody), 'info'],
+    ['مصروفات دفترة هذا الشهر', money(monthExpenseTotal), 'warning'],
+    ['مصروفات دفترة', expenses.length, 'info'],
+    ['عهد دفترة', custodies.length, 'info'],
+    ['دفعات غير ضريبية داخلية', money(internalReceiptTotal), 'success'],
   ].map(([l,v,t]) => `<div class="stat-card"><div class="label">${l}</div><div style="font-size:18px;font-weight:700;color:${t==='success'?'#5DCAA5':t==='warning'?'#FAC775':t==='danger'?'#E24B4A':'#85B7EB'}">${v}</div></div>`).join('');
   renderBankAccounts();
   renderAccountingGuide();
   renderDaftraFinanceSummary();
   const list = document.getElementById('finance-list');
   if (list) list.innerHTML = `
-    ${renderMonthlyFinanceTables()}
-    ${drafts.length && can('approveFinance') ? `
-      <div style="background:#1f0e0e;border:0.5px solid #E24B4A55;border-radius:8px;padding:10px 12px;margin:10px 0">
-        <div style="font-size:13px;font-weight:700;color:#E24B4A;margin-bottom:3px">حركات بانتظار الاعتماد</div>
-        <div class="text-secondary" style="font-size:12px">راجعها ثم اختر اعتماد أو رفض. لا تدخل في التقارير المعتمدة قبل الاعتماد.</div>
-      </div>` : ''}
-    ${renderRecentFinanceEntries()}`;
+    ${renderInternalNonTaxReceipts()}`;
   renderSmartAccounting();
 }
 

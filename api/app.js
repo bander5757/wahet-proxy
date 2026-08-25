@@ -292,6 +292,35 @@ function daftraCustodyFrom(wrapper) {
   };
 }
 
+function daftraPaymentFrom(wrapper) {
+  const payment = wrapper?.Payment || wrapper?.Receipt || wrapper?.Transaction || wrapper?.payment || wrapper || {};
+  return {
+    id: String(payment.id || ""),
+    code: payment.code || payment.no || payment.number || payment.receipt_no || "",
+    amount: moneyNumber(payment.amount || payment.total || payment.paid_amount),
+    date: firstDate(payment.date, payment.created_at, payment.created),
+    client: payment.client_business_name || payment.client_first_name || payment.client_name || payment.customer_name || "",
+    invoiceId: payment.invoice_id || payment.InvoiceId || "",
+    account: payment.account_name || payment.treasury_name || payment.payment_account_name || "",
+    method: payment.payment_method || payment.payment_method_name || "",
+    note: payment.note || payment.description || payment.notes || "",
+    raw: payment,
+  };
+}
+
+function daftraAccountFrom(wrapper) {
+  const account = wrapper?.Treasury || wrapper?.Account || wrapper?.BankAccount || wrapper?.account || wrapper || {};
+  return {
+    id: String(account.id || ""),
+    name: account.name || account.account_name || account.title || "",
+    code: account.code || account.no || account.number || "",
+    balance: moneyNumber(account.balance || account.current_balance || account.amount || account.total),
+    currency: account.currency_code || account.currency || "SAR",
+    type: account.type || account.account_type || "",
+    raw: account,
+  };
+}
+
 function financeRow(row) {
   return {
     id: row.id,
@@ -1213,13 +1242,15 @@ async function setDaftraClientsCache(client, payload) {
 async function getDaftraFinanceCache(client) {
   const cache = await getSetting(client, "daftra_finance_cache");
   if (!cache || typeof cache !== "object") {
-    return { expenses: [], custodies: [], syncedAt: null, counts: { expenses: 0, custodies: 0 }, errors: [] };
+    return { expenses: [], custodies: [], payments: [], accounts: [], syncedAt: null, counts: { expenses: 0, custodies: 0, payments: 0, accounts: 0 }, errors: [] };
   }
   return {
     expenses: Array.isArray(cache.expenses) ? cache.expenses : [],
     custodies: Array.isArray(cache.custodies) ? cache.custodies : [],
+    payments: Array.isArray(cache.payments) ? cache.payments : [],
+    accounts: Array.isArray(cache.accounts) ? cache.accounts : [],
     syncedAt: cache.syncedAt || null,
-    counts: cache.counts || { expenses: 0, custodies: 0 },
+    counts: cache.counts || { expenses: 0, custodies: 0, payments: 0, accounts: 0 },
     errors: Array.isArray(cache.errors) ? cache.errors : [],
   };
 }
@@ -1229,10 +1260,14 @@ async function setDaftraFinanceCache(client, payload) {
   const cache = {
     expenses: Array.isArray(payload.expenses) ? payload.expenses.slice(0, 2000) : [],
     custodies: Array.isArray(payload.custodies) ? payload.custodies.slice(0, 1000) : [],
+    payments: Array.isArray(payload.payments) ? payload.payments.slice(0, 2000) : [],
+    accounts: Array.isArray(payload.accounts) ? payload.accounts.slice(0, 500) : [],
     syncedAt: payload.syncedAt || new Date().toISOString(),
     counts: {
       expenses: Number(counts.expenses) || 0,
       custodies: Number(counts.custodies) || 0,
+      payments: Number(counts.payments) || 0,
+      accounts: Number(counts.accounts) || 0,
     },
     errors: Array.isArray(payload.errors) ? payload.errors.slice(0, 20) : [],
   };
@@ -1339,12 +1374,14 @@ async function syncDaftraClientsCache(client) {
     return { rows: [], error: errors.join(" | "), base: candidates[0], label };
   }
 
-  const [estimates, invoices, quoteStates, expensesResult, custodiesResult] = await Promise.all([
+  const [estimates, invoices, quoteStates, expensesResult, custodiesResult, paymentsResult, accountsResult] = await Promise.all([
     fetchPages("estimates"),
     fetchPages("invoices"),
     listQuoteStates(client),
     fetchOptionalPages("expenses", "المصروفات"),
     fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
+    fetchFirstAvailable(["payments", "receipts", "transactions"], "المدفوعات"),
+    fetchFirstAvailable(["treasuries", "bank_accounts", "accounts"], "الأرصدة"),
   ]);
   const merged = [];
 
@@ -1448,12 +1485,16 @@ async function syncDaftraClientsCache(client) {
 
   const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
   const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
-  const financeErrors = [expensesResult.error, custodiesResult.error].filter(Boolean);
+  const payments = paymentsResult.rows.map(daftraPaymentFrom).filter((row) => row.id || row.amount || row.date);
+  const accounts = accountsResult.rows.map(daftraAccountFrom).filter((row) => row.id || row.name || row.balance);
+  const financeErrors = [expensesResult.error, custodiesResult.error, paymentsResult.error, accountsResult.error].filter(Boolean);
   const financeCache = await setDaftraFinanceCache(client, {
     expenses,
     custodies,
+    payments,
+    accounts,
     syncedAt: new Date().toISOString(),
-    counts: { expenses: expenses.length, custodies: custodies.length },
+    counts: { expenses: expenses.length, custodies: custodies.length, payments: payments.length, accounts: accounts.length },
     errors: financeErrors,
   });
 

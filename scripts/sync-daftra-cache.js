@@ -108,6 +108,35 @@ function daftraCustodyFrom(wrapper) {
   };
 }
 
+function daftraPaymentFrom(wrapper) {
+  const payment = wrapper?.Payment || wrapper?.Receipt || wrapper?.Transaction || wrapper?.payment || wrapper || {};
+  return {
+    id: String(payment.id || ""),
+    code: payment.code || payment.no || payment.number || payment.receipt_no || "",
+    amount: moneyNumber(payment.amount || payment.total || payment.paid_amount),
+    date: firstDate(payment.date, payment.created_at, payment.created),
+    client: payment.client_business_name || payment.client_first_name || payment.client_name || payment.customer_name || "",
+    invoiceId: payment.invoice_id || payment.InvoiceId || "",
+    account: payment.account_name || payment.treasury_name || payment.payment_account_name || "",
+    method: payment.payment_method || payment.payment_method_name || "",
+    note: payment.note || payment.description || payment.notes || "",
+    raw: payment,
+  };
+}
+
+function daftraAccountFrom(wrapper) {
+  const account = wrapper?.Treasury || wrapper?.Account || wrapper?.BankAccount || wrapper?.account || wrapper || {};
+  return {
+    id: String(account.id || ""),
+    name: account.name || account.account_name || account.title || "",
+    code: account.code || account.no || account.number || "",
+    balance: moneyNumber(account.balance || account.current_balance || account.amount || account.total),
+    currency: account.currency_code || account.currency || "SAR",
+    type: account.type || account.account_type || "",
+    raw: account,
+  };
+}
+
 async function main() {
   const databaseUrl = readLocalDatabaseUrl();
   if (!databaseUrl) throw new Error("DATABASE_URL is missing");
@@ -170,7 +199,7 @@ async function main() {
       return { rows: [], error: errors.join(" | "), base: candidates[0], label };
     }
 
-    const [estimates, invoices, statesResult, expensesResult, custodiesResult] = await Promise.all([
+    const [estimates, invoices, statesResult, expensesResult, custodiesResult, paymentsResult, accountsResult] = await Promise.all([
       fetchPages("estimates"),
       fetchPages("invoices"),
       pool.query(`
@@ -179,6 +208,8 @@ async function main() {
       `),
       fetchOptionalPages("expenses", "المصروفات"),
       fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
+      fetchFirstAvailable(["payments", "receipts", "transactions"], "المدفوعات"),
+      fetchFirstAvailable(["treasuries", "bank_accounts", "accounts"], "الأرصدة"),
     ]);
 
     const states = Object.fromEntries(
@@ -300,12 +331,16 @@ async function main() {
 
     const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
     const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
+    const payments = paymentsResult.rows.map(daftraPaymentFrom).filter((row) => row.id || row.amount || row.date);
+    const accounts = accountsResult.rows.map(daftraAccountFrom).filter((row) => row.id || row.name || row.balance);
     const financeCache = {
       expenses,
       custodies,
+      payments,
+      accounts,
       syncedAt: new Date().toISOString(),
-      counts: { expenses: expenses.length, custodies: custodies.length },
-      errors: [expensesResult.error, custodiesResult.error].filter(Boolean),
+      counts: { expenses: expenses.length, custodies: custodies.length, payments: payments.length, accounts: accounts.length },
+      errors: [expensesResult.error, custodiesResult.error, paymentsResult.error, accountsResult.error].filter(Boolean),
     };
     await pool.query(
       `insert into app_settings (key, value, updated_at)
@@ -323,6 +358,8 @@ async function main() {
           invoices: invoices.length,
           expenses: expenses.length,
           custodies: custodies.length,
+          payments: payments.length,
+          accounts: accounts.length,
           financeErrors: financeCache.errors,
           first: merged[0]
             ? { id: merged[0].id, name: merged[0].name, created: merged[0].created, stage: merged[0].stage }
