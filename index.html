@@ -1432,6 +1432,7 @@ function renderBankAccounts() {
         </div>
         <div style="font-size:19px;font-weight:800;color:${accountBalance(a.name) >= 0 ? '#5DCAA5' : '#E24B4A'}">${money(accountBalance(a.name))}</div>
         <div class="text-secondary" style="font-size:11px;margin-top:4px">ابتدائي: ${money(a.openingBalance)}</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:4px">${a.source === 'daftra_official' ? 'رسمي/ضريبي — يقرأ من دفترة' : 'داخلي — عروض مؤكدة بدون ضريبة'}</div>
       </div>`).join('')}
     </div>`;
   refreshFinanceAccountSelects();
@@ -1528,9 +1529,9 @@ const saveBankStatement = () => {
   try { localStorage.setItem('wk_bank_statement_meta', JSON.stringify(bankStatementMeta || {})); } catch(e) {}
 };
 const defaultBankAccounts = () => [
-  { id: 'acc_official', name: 'الحساب الرسمي', openingBalance: 0 },
-  { id: 'acc_secondary', name: 'الحساب الفرعي', openingBalance: 0 },
-  { id: 'acc_cash', name: 'كاش', openingBalance: 0 }
+  { id: 'acc_official', name: 'حساب المؤسسة الرسمي', openingBalance: 0, source: 'daftra_official', taxAccount: true },
+  { id: 'acc_abufayez_clients', name: 'حساب ابو فايز الشخصي للعملاء', openingBalance: 0, source: 'internal_non_tax', taxAccount: false },
+  { id: 'acc_faisal', name: 'حساب فيصل', openingBalance: 0, source: 'internal_non_tax', taxAccount: false }
 ];
 const accountingLabel = account => `${account.code} - ${account.name_ar || account.name || ""}`;
 const accountingOptionLabel = account => `[${account.code}] ${account.name_ar || account.name || ""}${account.full_path ? " — " + account.full_path : ""}`;
@@ -1579,21 +1580,45 @@ const accountingOptions = (type = "مصروف") => {
 };
 const normalizeBankAccounts = () => {
   if (!Array.isArray(bankAccounts) || !bankAccounts.length) bankAccounts = defaultBankAccounts();
+  const legacyNames = {
+    'الحساب الرسمي': 'حساب المؤسسة الرسمي',
+    'الحساب الفرعي': 'حساب ابو فايز الشخصي للعملاء',
+    'كاش': 'حساب فيصل'
+  };
   const seen = new Set();
   bankAccounts = bankAccounts
     .map((a, i) => ({
       id: a.id || 'acc_' + Date.now() + '_' + i,
-      name: String(a.name || '').trim(),
-      openingBalance: Number(a.openingBalance) || 0
+      name: legacyNames[String(a.name || '').trim()] || String(a.name || '').trim(),
+      openingBalance: Number(a.openingBalance) || 0,
+      source: a.source || '',
+      taxAccount: Boolean(a.taxAccount)
     }))
     .filter(a => a.name && !seen.has(a.name) && seen.add(a.name));
-  if (!bankAccounts.length) bankAccounts = defaultBankAccounts();
+  const defaults = defaultBankAccounts();
+  defaults.forEach(d => {
+    const existing = bankAccounts.find(a => a.id === d.id || a.name === d.name);
+    if (existing) {
+      existing.id = existing.id || d.id;
+      existing.source = d.source;
+      existing.taxAccount = d.taxAccount;
+    } else {
+      bankAccounts.push({ ...d });
+    }
+  });
+  bankAccounts = bankAccounts.filter(a => a.name);
 };
 const saveFinanceMetaLocal = () => {
   normalizeBankAccounts();
   try { localStorage.setItem('wk_bank_accounts', JSON.stringify(bankAccounts)); } catch(e) {}
   try { localStorage.setItem('wk_custody_spends', JSON.stringify(custodySpends || {})); } catch(e) {}
 };
+function nonTaxReceiptAccounts() {
+  normalizeBankAccounts();
+  const allowedIds = new Set(['acc_abufayez_clients', 'acc_faisal']);
+  const allowedNames = new Set(['حساب ابو فايز الشخصي للعملاء', 'حساب فيصل']);
+  return bankAccounts.filter(a => a.source === 'internal_non_tax' || allowedIds.has(a.id) || allowedNames.has(a.name));
+}
 async function persistFinanceMeta() {
   saveFinanceMetaLocal();
   if (!apiOnline) return false;
@@ -2361,10 +2386,11 @@ async function setQuoteConfirmed(id, confirmed) {
       const chartAccountId = defaultRevenueCategory();
       if (!requirePostableCategory(chartAccountId, 'لا يوجد حساب إيراد قابل للترحيل في الدليل المحاسبي المعتمد')) return;
       const category = accountDisplay(chartAccountId);
-      normalizeBankAccounts();
-      const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
+      const receiptAccounts = nonTaxReceiptAccounts();
+      if (!receiptAccounts.length) { showMsg('لا توجد حسابات داخلية متاحة لدفعات العروض غير الضريبية'); return; }
+      const accountNames = receiptAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
       const selected = Number(prompt('اختر رقم الحساب الذي وصل له الإيراد:\n' + accountNames, '1') || 1) - 1;
-      const account = bankAccounts[selected]?.name || bankAccounts[0]?.name || 'الحساب الرسمي';
+      const account = receiptAccounts[selected]?.name || receiptAccounts[0]?.name || 'حساب ابو فايز الشخصي للعملاء';
       const refs = [clientRefToken(c.id)];
       if (c.daftraEstId) refs.push(clientRefToken('est_' + c.daftraEstId));
       await createFinanceEntry({
@@ -2799,12 +2825,12 @@ async function createFinanceEntry(entry, successText) {
   showMsg((savedRemote ? '✅ ' : '✅ محلياً: ') + successText);
 }
 
-function showPaymentDialog(clientName, fullAmount) {
+function showPaymentDialog(clientName, fullAmount, accountList = bankAccounts) {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.style.zIndex = '200';
-    const accountOptions = bankAccounts.map((a, i) =>
+    const accountOptions = accountList.map((a, i) =>
       `<option value="${htmlEscape(a.name)}">${htmlEscape(a.name)}</option>`).join('');
     overlay.innerHTML = `
       <div class="modal" style="max-width:360px">
@@ -2835,10 +2861,16 @@ function showPaymentDialog(clientName, fullAmount) {
 async function recordClientReceipt(clientId) {
   const client = clients.find(c => c.id === clientId);
   if (!client) return;
+  if (isTaxInvoice(client)) {
+    showMsg('دفعات الفواتير الضريبية تُقرأ من دفترة ولا تسجل من لوحة التحكم');
+    return;
+  }
   normalizeBankAccounts();
+  const receiptAccounts = nonTaxReceiptAccounts();
+  if (!receiptAccounts.length) { showMsg('لا توجد حسابات داخلية متاحة لدفعات العروض غير الضريبية'); return; }
   const state = clientPaymentState(client);
   const fullAmount = state.remaining > 0 ? state.remaining : state.total;
-  const amountResult = await showPaymentDialog(client.name || 'العميل', fullAmount);
+  const amountResult = await showPaymentDialog(client.name || 'العميل', fullAmount, receiptAccounts);
   if (!amountResult) return;
   const { amount, account } = amountResult;
   if (!amount) { showMsg('أدخل مبلغ الدفعة'); return; }
@@ -2872,10 +2904,11 @@ async function editClientReceipt(entryId, clientId) {
   normalizeBankAccounts();
   const amount = Number(prompt('تعديل مبلغ الدفعة', String(entry.amount || 0)) || 0) || 0;
   if (amount <= 0) { showMsg('أدخل مبلغ صحيح'); return; }
-  const accountNames = bankAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
-  const currentIndex = Math.max(0, bankAccounts.findIndex(a => a.name === entry.account));
+  const receiptAccounts = nonTaxReceiptAccounts();
+  const accountNames = receiptAccounts.map((a, i) => (i + 1) + '. ' + a.name).join('\n');
+  const currentIndex = Math.max(0, receiptAccounts.findIndex(a => a.name === entry.account));
   const selected = Number(prompt('اختر رقم الحساب:\n' + accountNames, String(currentIndex + 1)) || (currentIndex + 1)) - 1;
-  const account = bankAccounts[selected]?.name || entry.account || bankAccounts[0]?.name || 'الحساب الرسمي';
+  const account = receiptAccounts[selected]?.name || entry.account || receiptAccounts[0]?.name || 'حساب ابو فايز الشخصي للعملاء';
   const old = { ...entry };
   entry.amount = amount;
   entry.account = account;
@@ -5329,7 +5362,7 @@ function showModal(id) {
       ${!taxInvoice ? `<button class="${confirmed?'btn-secondary':'btn-primary'}" style="flex:1" onclick="setQuoteConfirmed('${c.id}', ${confirmed?'false':'true'})">${confirmed?'إلغاء تأكيد العرض':'تأكيد عرض السعر'}</button>` : ''}
       ${!taxInvoice && c.stage !== 'استغنى' ? `<button class="btn-secondary" style="flex:1;color:#E24B4A;border-color:#E24B4A" onclick="setQuoteLost('${c.id}')">العميل استغنى</button>` : ''}
       ${c.stage === 'استغنى' ? `<button class="btn-secondary" style="flex:1" onclick="reopenQuote('${c.id}')">إرجاع للمتابعة</button>` : ''}
-      ${confirmed ? `<button class="btn-secondary" style="flex:1" onclick="recordClientReceipt('${c.id}')">تسجيل دفعة</button>` : ''}
+      ${confirmed && !taxInvoice ? `<button class="btn-secondary" style="flex:1" onclick="recordClientReceipt('${c.id}')">تسجيل دفعة</button>` : ''}
       ${nextStage && !(c.stage === 'عرض_سعر' && !confirmed) ? `<button class="btn-primary" style="flex:1" onclick="advance('${c.id}')">→ ${LABELS[nextStage]}</button>` : ''}
       ${c.phone ? `<button class="btn-green" style="flex:1" onclick="window.open('https://wa.me/${c.phone}?text='+encodeURIComponent('مرحباً ${c.name} 👋\\nتواصل معك فريق واحة الخيمة 🏕️'))">واتساب</button>` : ''}
       <button class="btn-secondary" style="flex:1" onclick="closeModal()">إغلاق</button>
