@@ -15,8 +15,30 @@ module.exports = async function handler(req, res) {
   if (!subdomain || !apikey || !endpoint) {
     return res.status(400).json({ error: "subdomain و apikey و endpoint مطلوبة" });
   }
+  if (method !== "GET") {
+    return res.status(405).json({ error: "وسيط دفترة يسمح بطلبات GET فقط" });
+  }
+  const cleanEndpoint = String(endpoint || "").replace(/^\/+/, "");
+  const allowedRoots = [
+    "estimates",
+    "invoices",
+    "expenses",
+    "employee_custodies",
+    "employee-custodies",
+    "custodies",
+    "payments",
+    "receipts",
+    "transactions",
+    "treasuries",
+    "bank_accounts",
+    "accounts",
+  ];
+  const root = cleanEndpoint.split(/[/.?]/)[0];
+  if (!allowedRoots.includes(root)) {
+    return res.status(403).json({ error: "مسار دفترة غير مسموح في الوسيط" });
+  }
 
-  const url = `https://${subdomain}.daftra.com/api2/${endpoint}`;
+  const url = `https://${subdomain}.daftra.com/api2/${cleanEndpoint}`;
 
   try {
     const response = await fetch(url, {

@@ -418,6 +418,19 @@
       <button class="btn-primary" onclick="saveConfig()">حفظ والمزامنة</button>
       <button class="btn-secondary" onclick="toggleSettings()">إلغاء</button>
     </div>
+    <div class="section" style="margin-top:12px">
+      <div class="flex-between mb-12">
+        <div>
+          <div style="font-size:14px;font-weight:700">حالة مزامنة دفترة</div>
+          <div id="daftra-health-status" class="text-secondary" style="font-size:11px;margin-top:2px">لم يتم الفحص بعد</div>
+        </div>
+        <div class="flex gap-6" style="flex-wrap:wrap;justify-content:flex-end">
+          <button class="btn-secondary" onclick="checkSystemHealth()">فحص الاتصال</button>
+          <button class="btn-secondary" onclick="testAllDaftraSources()">اختبار المصادر</button>
+        </div>
+      </div>
+      <div id="daftra-capabilities-view"></div>
+    </div>
   </div>
   <div class="section">
     <div class="flex-between mb-12">
@@ -1011,6 +1024,8 @@ let financeEntries = [];
 try { financeEntries = JSON.parse(localStorage.getItem('wk_finance_entries') || '[]'); } catch(e) { financeEntries = []; }
 let daftraFinance = { expenses: [], custodies: [], payments: [], accounts: [], syncedAt: null, counts: { expenses: 0, custodies: 0, payments: 0, accounts: 0 }, errors: [] };
 try { daftraFinance = Object.assign(daftraFinance, JSON.parse(localStorage.getItem('wk_daftra_finance') || '{}')); } catch(e) {}
+let daftraCapabilities = { checkedAt: null, sources: [] };
+try { daftraCapabilities = Object.assign(daftraCapabilities, JSON.parse(localStorage.getItem('wk_daftra_capabilities') || '{}')); } catch(e) {}
 let bankStatementRows = [];
 try { bankStatementRows = JSON.parse(localStorage.getItem('wk_bank_statement_rows') || '[]'); } catch(e) { bankStatementRows = []; }
 let bankStatementMeta = {};
@@ -1726,6 +1741,13 @@ async function loadAppData() {
       };
       try { localStorage.setItem('wk_daftra_finance', JSON.stringify(daftraFinance)); } catch(e) {}
     }
+    if (data.daftraCapabilities && typeof data.daftraCapabilities === 'object') {
+      daftraCapabilities = {
+        checkedAt: data.daftraCapabilities.checkedAt || null,
+        sources: Array.isArray(data.daftraCapabilities.sources) ? data.daftraCapabilities.sources : []
+      };
+      try { localStorage.setItem('wk_daftra_capabilities', JSON.stringify(daftraCapabilities)); } catch(e) {}
+    }
     if (data.bankStatement && Array.isArray(data.bankStatement.rows)) {
       bankStatementRows = data.bankStatement.rows;
       bankStatementMeta = {
@@ -2047,6 +2069,94 @@ async function saveConfig() {
   toggleSettings();
   showMsg((saved ? '✅ تم حفظ الإعدادات' : '⚠️ الإعدادات مؤقتة') + ' — Subdomain: ' + subdomain);
   syncDaftra();
+}
+
+const DAFTRA_CAPABILITY_SOURCES = [
+  { key: 'estimates', label: 'عروض الأسعار' },
+  { key: 'invoices', label: 'الفواتير' },
+  { key: 'expenses', label: 'المصروفات' },
+  { key: 'custodies', label: 'العهد' },
+  { key: 'payments', label: 'المدفوعات' },
+  { key: 'accounts', label: 'الأرصدة/الخزائن' },
+];
+const capabilityStatusLabel = status => ({
+  supported: 'مدعوم',
+  unsupported: 'غير مدعوم',
+  unauthorized: 'غير مصرح',
+  error: 'خطأ اتصال',
+  unknown: 'غير مختبر'
+})[status || 'unknown'] || status;
+const capabilityStatusColor = status => ({
+  supported: '#5DCAA5',
+  unsupported: '#9a9898',
+  unauthorized: '#E24B4A',
+  error: '#E24B4A',
+  unknown: '#FAC775'
+})[status || 'unknown'] || '#9a9898';
+
+function renderDaftraCapabilities() {
+  const el = document.getElementById('daftra-capabilities-view');
+  if (!el) return;
+  const rows = DAFTRA_CAPABILITY_SOURCES.map(src => {
+    const found = (daftraCapabilities.sources || []).find(row => row.key === src.key) || {};
+    return { ...src, ...found, label: src.label };
+  });
+  el.innerHTML = `
+    <div class="text-secondary" style="font-size:11px;margin-bottom:8px">
+      آخر فحص مصادر: ${daftraCapabilities.checkedAt ? new Date(daftraCapabilities.checkedAt).toLocaleString('ar-SA') : 'لم يتم بعد'}
+    </div>
+    ${rows.map(row => `<div class="list-row" style="align-items:flex-start">
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:800">${htmlEscape(row.label)}</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:3px">
+          المسار: ${htmlEscape(row.endpoint || 'غير محدد')} — السجلات: ${Number(row.count || 0).toLocaleString('ar-SA')} — آخر نجاح: ${row.lastSuccessAt ? new Date(row.lastSuccessAt).toLocaleString('ar-SA') : '—'}
+        </div>
+        ${row.lastError ? `<div style="font-size:11px;color:var(--red);margin-top:3px;line-height:1.6">${htmlEscape(row.lastError)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${statusPill(capabilityStatusLabel(row.status), capabilityStatusColor(row.status))}
+        <button class="btn-secondary" style="font-size:11px;padding:4px 8px" onclick="testDaftraSource('${row.key}')">اختبار</button>
+      </div>
+    </div>`).join('')}`;
+}
+
+async function checkSystemHealth() {
+  const el = document.getElementById('daftra-health-status');
+  if (el) el.textContent = 'جاري فحص قاعدة البيانات...';
+  try {
+    const res = await apiRequest('/health');
+    if (el) {
+      el.textContent = res.database === 'connected' ? 'قاعدة البيانات متصلة' : 'حالة غير معروفة';
+      el.style.color = res.database === 'connected' ? 'var(--green)' : 'var(--gold)';
+    }
+    showMsg('✅ قاعدة البيانات متصلة');
+  } catch(e) {
+    if (el) {
+      el.textContent = 'خطأ قاعدة البيانات: ' + e.message;
+      el.style.color = 'var(--red)';
+    }
+    showMsg('❌ فشل فحص قاعدة البيانات: ' + e.message);
+  }
+}
+
+async function testDaftraSource(source) {
+  showMsg('⏳ اختبار مصدر دفترة...');
+  try {
+    const res = await apiRequest('/daftra/source-test?source=' + encodeURIComponent(source), { method: 'POST', body: JSON.stringify({ source }) });
+    daftraCapabilities = res.data?.capabilities || daftraCapabilities;
+    try { localStorage.setItem('wk_daftra_capabilities', JSON.stringify(daftraCapabilities)); } catch(e) {}
+    renderDaftraCapabilities();
+    const r = res.data?.result || {};
+    showMsg('تم اختبار ' + (r.label || source) + ': ' + capabilityStatusLabel(r.status));
+  } catch(e) {
+    showMsg('❌ فشل اختبار المصدر: ' + e.message);
+  }
+}
+
+async function testAllDaftraSources() {
+  for (const src of DAFTRA_CAPABILITY_SOURCES) {
+    await testDaftraSource(src.key);
+  }
 }
 
 function toggleApiKeyVisibility() {
@@ -5500,6 +5610,7 @@ function render() {
     }
   };
   safe('متابعة العملاء', renderClientOverview, 'pending-quotes-list');
+  safe('حالة مزامنة دفترة', renderDaftraCapabilities, 'daftra-capabilities-view');
   safe('كانبان العملاء', () => {
     const kanban = document.getElementById('kanban');
     if (!kanban) return;
@@ -5795,7 +5906,11 @@ function toggleSettings() {
   }
   const p = document.getElementById('settings-panel');
   p.style.display = p.style.display === 'none' ? 'block' : 'none';
-  if (p.style.display === 'block') loadConfigUI();
+  if (p.style.display === 'block') {
+    loadConfigUI();
+    renderDaftraCapabilities();
+    checkSystemHealth();
+  }
 }
 function toggleNotif() {
   const p = document.getElementById('notif-panel');

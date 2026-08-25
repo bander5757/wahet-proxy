@@ -1274,6 +1274,42 @@ async function setDaftraFinanceCache(client, payload) {
   return setSetting(client, "daftra_finance_cache", cache);
 }
 
+function daftraCapabilityRow(key, label, result, count, statusOverride) {
+  const supported = !result.error;
+  let status = statusOverride || (supported ? "supported" : "error");
+  const message = result.error || "";
+  if (/not found|404/i.test(message)) status = "unsupported";
+  if (/unauthor|forbidden|401|403|permission|صلاح/i.test(message)) status = "unauthorized";
+  return {
+    key,
+    label,
+    status,
+    endpoint: result.base || "",
+    count: Number(count) || 0,
+    lastSuccessAt: supported ? new Date().toISOString() : null,
+    lastErrorAt: supported ? null : new Date().toISOString(),
+    lastError: message,
+  };
+}
+
+async function getDaftraCapabilities(client) {
+  const saved = await getSetting(client, "daftra_capabilities");
+  if (!saved || typeof saved !== "object") {
+    return { checkedAt: null, sources: [] };
+  }
+  return {
+    checkedAt: saved.checkedAt || null,
+    sources: Array.isArray(saved.sources) ? saved.sources : [],
+  };
+}
+
+async function setDaftraCapabilities(client, sources) {
+  return setSetting(client, "daftra_capabilities", {
+    checkedAt: new Date().toISOString(),
+    sources: Array.isArray(sources) ? sources : [],
+  });
+}
+
 async function getBankStatementCache(client) {
   const cache = await getSetting(client, "bank_statement_cache");
   if (!cache || !Array.isArray(cache.rows)) {
@@ -1497,10 +1533,19 @@ async function syncDaftraClientsCache(client) {
     counts: { expenses: expenses.length, custodies: custodies.length, payments: payments.length, accounts: accounts.length },
     errors: financeErrors,
   });
+  const capabilities = await setDaftraCapabilities(client, [
+    daftraCapabilityRow("estimates", "عروض الأسعار", { base: "estimates", error: null }, estimates.length),
+    daftraCapabilityRow("invoices", "الفواتير", { base: "invoices", error: null }, invoices.length),
+    daftraCapabilityRow("expenses", "المصروفات", expensesResult, expenses.length),
+    daftraCapabilityRow("custodies", "العهد", custodiesResult, custodies.length),
+    daftraCapabilityRow("payments", "المدفوعات", paymentsResult, payments.length),
+    daftraCapabilityRow("accounts", "الأرصدة/الخزائن", accountsResult, accounts.length),
+  ]);
 
   return {
     ...clientsCache,
     finance: financeCache,
+    capabilities,
   };
 }
 
@@ -1514,6 +1559,50 @@ function validateDaftraSettings(payload) {
     throw err;
   }
   return { proxyUrl, subdomain, apikey };
+}
+
+const DAFTRA_SOURCE_TESTS = {
+  estimates: { label: "عروض الأسعار", endpoints: ["estimates"] },
+  invoices: { label: "الفواتير", endpoints: ["invoices"] },
+  expenses: { label: "المصروفات", endpoints: ["expenses"] },
+  custodies: { label: "العهد", endpoints: ["employee_custodies", "employee-custodies", "custodies"] },
+  payments: { label: "المدفوعات", endpoints: ["payments", "receipts", "transactions"] },
+  accounts: { label: "الأرصدة/الخزائن", endpoints: ["treasuries", "bank_accounts", "accounts"] },
+};
+
+async function testDaftraSource(client, sourceKey) {
+  const source = DAFTRA_SOURCE_TESTS[sourceKey];
+  if (!source) {
+    const err = new Error("مصدر دفترة غير معروف");
+    err.statusCode = 400;
+    throw err;
+  }
+  const cfg = await getSetting(client, "daftra");
+  if (!cfg?.subdomain || !cfg?.apikey) {
+    const err = new Error("إعدادات دفترة غير مكتملة");
+    err.statusCode = 400;
+    throw err;
+  }
+  const errors = [];
+  for (const endpoint of source.endpoints) {
+    try {
+      const url = `https://${cfg.subdomain}.daftra.com/api2/${endpoint}.json?limit=1&page=1`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Content-Type": "application/json", APIKEY: cfg.apikey },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        errors.push(`${endpoint}: ${data.error || data.message || res.status}`);
+        continue;
+      }
+      const rows = Array.isArray(data.data) ? data.data : [];
+      return daftraCapabilityRow(sourceKey, source.label, { base: endpoint, error: null }, rows.length);
+    } catch (err) {
+      errors.push(`${endpoint}: ${err.message}`);
+    }
+  }
+  return daftraCapabilityRow(sourceKey, source.label, { base: source.endpoints[0], error: errors.join(" | ") }, 0);
 }
 
 async function createFinance(client, payload, user) {
@@ -1688,6 +1777,7 @@ async function dashboard(client, user) {
   const daftraSettings = await getSetting(client, "daftra");
   const daftraClientsCache = await getDaftraClientsCache(client);
   const daftraFinanceCache = await getDaftraFinanceCache(client);
+  const daftraCapabilities = await getDaftraCapabilities(client);
   const bankStatement = await getBankStatementCache(client);
   const financeMeta = await getFinanceMeta(client);
   const chartAccounts = await listChartAccounts(client);
@@ -1712,6 +1802,7 @@ async function dashboard(client, user) {
       financeErrors: daftraFinanceCache.errors,
     },
     daftraFinance: daftraFinanceCache,
+    daftraCapabilities,
     bankStatement,
     financeMeta,
     chartAccounts,
@@ -1726,10 +1817,24 @@ module.exports = async function handler(req, res) {
   sendCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  const path = String(req.query.path || req.url.split("/api/app")[1] || "/").split("?")[0];
+  if (req.method === "GET" && path === "/health") {
+    try {
+      const healthClient = await getPool().connect();
+      try {
+        await healthClient.query("select 1");
+        return res.status(200).json({ ok: true, database: "connected" });
+      } finally {
+        healthClient.release();
+      }
+    } catch (err) {
+      return res.status(503).json({ ok: false, database: "error", error: err.message });
+    }
+  }
+
   let client;
   try {
     client = await getPool().connect();
-    const path = String(req.query.path || req.url.split("/api/app")[1] || "/").split("?")[0];
     const requestUrl = new URL(req.url || "/", "http://local");
     const query = { ...(req.query || {}), ...Object.fromEntries(requestUrl.searchParams.entries()) };
     const token = req.headers["x-wahet-token"] || "";
@@ -1835,6 +1940,19 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, data: saved });
     }
 
+    if (req.method === "GET" && path === "/daftra/capabilities") {
+      return res.status(200).json({ ok: true, data: await getDaftraCapabilities(client) });
+    }
+
+    if ((req.method === "POST" || req.method === "GET") && path === "/daftra/source-test") {
+      const source = req.body?.source || query.source || "";
+      const result = await testDaftraSource(client, String(source));
+      const current = await getDaftraCapabilities(client);
+      const sources = (current.sources || []).filter((row) => row.key !== result.key).concat([result]);
+      const saved = await setDaftraCapabilities(client, sources);
+      return res.status(200).json({ ok: true, data: { result, capabilities: saved } });
+    }
+
     if (req.method === "GET" && path === "/clients-cache") {
       return res.status(200).json({ ok: true, data: await getDaftraClientsCache(client) });
     }
@@ -1855,6 +1973,7 @@ module.exports = async function handler(req, res) {
           financeSyncedAt: saved.finance?.syncedAt || null,
           financeCounts: saved.finance?.counts || { expenses: 0, custodies: 0 },
           financeErrors: saved.finance?.errors || [],
+          capabilities: saved.capabilities || null,
         },
       });
     }
