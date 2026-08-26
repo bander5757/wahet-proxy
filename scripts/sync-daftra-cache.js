@@ -199,7 +199,7 @@ async function main() {
       return { rows: [], error: errors.join(" | "), base: candidates[0], label };
     }
 
-    const [estimates, invoices, statesResult, expensesResult, custodiesResult, paymentsResult, accountsResult] = await Promise.all([
+    const [estimates, invoices, statesResult, expensesResult, accountsResult] = await Promise.all([
       fetchPages("estimates"),
       fetchPages("invoices"),
       pool.query(`
@@ -207,9 +207,7 @@ async function main() {
         from daftra_quote_states
       `),
       fetchOptionalPages("expenses", "المصروفات"),
-      fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
-      fetchFirstAvailable(["payments", "receipts", "transactions"], "المدفوعات"),
-      fetchFirstAvailable(["treasuries", "bank_accounts", "accounts"], "الأرصدة"),
+      fetchOptionalPages("treasuries", "الأرصدة"),
     ]);
 
     const states = Object.fromEntries(
@@ -330,8 +328,8 @@ async function main() {
     );
 
     const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
-    const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
-    const payments = paymentsResult.rows.map(daftraPaymentFrom).filter((row) => row.id || row.amount || row.date);
+    const custodies = [];
+    const payments = [];
     const accounts = accountsResult.rows.map(daftraAccountFrom).filter((row) => row.id || row.name || row.balance);
     const financeCache = {
       expenses,
@@ -340,7 +338,12 @@ async function main() {
       accounts,
       syncedAt: new Date().toISOString(),
       counts: { expenses: expenses.length, custodies: custodies.length, payments: payments.length, accounts: accounts.length },
-      errors: [expensesResult.error, custodiesResult.error, paymentsResult.error, accountsResult.error].filter(Boolean),
+      errors: [
+        expensesResult.error,
+        "العهد غير متاحة حالياً من API دفترة بالمسارات المختبرة",
+        "المدفوعات غير متاحة حالياً كمسار مستقل؛ يتم الاعتماد على بيانات الفاتورة إن رجعت المدفوع والمتبقي",
+        accountsResult.error,
+      ].filter(Boolean),
     };
     await pool.query(
       `insert into app_settings (key, value, updated_at)

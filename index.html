@@ -481,15 +481,18 @@
           <div style="font-size:15px;font-weight:600">محاسبة دفترة</div>
           <div style="font-size:11px;color:#9a9898;margin-top:2px">قراءة المصروفات والعهد والأرصدة من دفترة، مع دفعات داخلية للعروض غير الضريبية فقط</div>
       </div>
+      <div style="min-width:170px">
+        <div class="label">الشهر</div>
+        <input id="finance-month-filter" type="month" onchange="renderFinance()">
+      </div>
     </div>
     <div id="finance-summary" class="grid-4"></div>
     <div id="bank-accounts-section" class="section" style="margin-top:12px;display:none">
       <div class="flex-between mb-12">
         <div>
-          <div style="font-size:15px;font-weight:600">الحسابات البنكية</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">حساب المؤسسة يُقرأ من دفترة، وحساب ابو فايز وحساب فيصل تُحسب عليها دفعات العروض غير الضريبية</div>
+          <div style="font-size:15px;font-weight:600">أرصدة داخلية للعروض غير الضريبية</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">حساب ابو فايز وحساب فيصل فقط؛ أما حساب المؤسسة الرسمي فيُقرأ من خزائن دفترة</div>
         </div>
-        <button class="btn-secondary" onclick="addBankAccount()">+ حساب</button>
       </div>
       <div id="bank-accounts-view"></div>
     </div>
@@ -506,36 +509,6 @@
     <div style="display:none" aria-hidden="true">
       <span id="accounting-guide-count"></span>
       <div id="accounting-guide-view"></div>
-    </div>
-    <div class="section" style="margin-top:12px">
-      <div class="flex-between mb-12">
-        <div>
-          <div style="font-size:15px;font-weight:600">المحاسب الذكي</div>
-          <div style="font-size:11px;color:#9a9898;margin-top:2px">مطابقة كشف البنك، ضريبة الربع، وتقرير أسبوعي جاهز للمراجعة</div>
-        </div>
-        <button class="btn-primary" onclick="runSmartAccounting()">تحليل الآن</button>
-      </div>
-      <div class="grid-2">
-        <div>
-          <div class="label">رفع كشف البنك CSV / PDF</div>
-          <input id="bank-file" type="file" accept=".csv,.txt,.pdf,application/pdf" onchange="loadBankFile(event)">
-          <div class="text-secondary" style="font-size:11px;margin-top:4px">CSV يقرأ مباشرة. PDF يتم حفظ اسمه للتتبع، واستخراج بنوده يحتاج تحويل/استخراج نص في المرحلة التالية.</div>
-        </div>
-        <div>
-          <div class="label">الشهر</div>
-          <input id="bank-month" type="month">
-        </div>
-        <div style="grid-column:1/-1">
-          <div class="label">أو الصق كشف البنك هنا</div>
-          <textarea id="bank-text" rows="5" placeholder="التاريخ, البيان, مدين, دائن&#10;2026-06-01, تحويل عميل, , 1150"></textarea>
-        </div>
-      </div>
-      <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
-        <button class="btn-secondary" onclick="runSmartAccounting()">مطابقة وحساب</button>
-        <button class="btn-secondary" onclick="copyAccountingReport()">نسخ التقرير</button>
-        <button class="btn-secondary" onclick="clearBankStatement()">مسح كشف البنك</button>
-      </div>
-      <div id="smart-accounting-view" class="mt-8"></div>
     </div>
     <div id="finance-list" class="mt-8"></div>
   </div>
@@ -974,7 +947,7 @@
   </div>
 </div>
 
-<button class="btn-green quick-fab" data-action="quickEntry" onclick="openQuickEntry()">+ حركة</button>
+<button class="btn-green quick-fab" data-action="quickEntry" style="display:none" onclick="openQuickEntry()">+ حركة</button>
 
 <div class="bottom-nav" id="bottom-nav">
   <button class="active" onclick="setTab('home')"><span class="bn-icon">🏠</span><span>الرئيسية</span></button>
@@ -1396,9 +1369,10 @@ function renderBankAccounts() {
   }
   normalizeBankAccounts();
   section.style.display = '';
+  const internalAccounts = nonTaxReceiptAccounts();
   view.innerHTML = `
-    <div class="grid-4">
-      ${bankAccounts.map(a => `<div class="stat-card">
+    <div class="grid-2">
+      ${internalAccounts.map(a => `<div class="stat-card">
         <div class="flex-between" style="gap:8px">
           <div class="label">${htmlEscape(a.name)}</div>
           <div class="flex gap-6">
@@ -1408,7 +1382,7 @@ function renderBankAccounts() {
         </div>
         <div style="font-size:19px;font-weight:800;color:${accountBalance(a.name) >= 0 ? '#5DCAA5' : '#E24B4A'}">${money(accountBalance(a.name))}</div>
         <div class="text-secondary" style="font-size:11px;margin-top:4px">ابتدائي: ${money(a.openingBalance)}</div>
-        <div class="text-secondary" style="font-size:11px;margin-top:4px">${a.source === 'daftra_official' ? 'رسمي/ضريبي — يقرأ من دفترة' : 'داخلي — عروض مؤكدة بدون ضريبة'}</div>
+        <div class="text-secondary" style="font-size:11px;margin-top:4px">داخلي — دفعات عروض مؤكدة بدون ضريبة</div>
       </div>`).join('')}
     </div>`;
   refreshFinanceAccountSelects();
@@ -2099,7 +2073,8 @@ function renderDaftraCapabilities() {
   if (!el) return;
   const rows = DAFTRA_CAPABILITY_SOURCES.map(src => {
     const found = (daftraCapabilities.sources || []).find(row => row.key === src.key) || {};
-    return { ...src, ...found, label: src.label };
+    const status = /invalid endpoint/i.test(found.lastError || '') ? 'unsupported' : found.status;
+    return { ...src, ...found, status, label: src.label };
   });
   el.innerHTML = `
     <div class="text-secondary" style="font-size:11px;margin-bottom:8px">
@@ -3591,6 +3566,12 @@ function inMonth(date, key = currentMonthKey()) {
   return dateOnly(date).slice(0, 7) === key;
 }
 
+function selectedFinanceMonth() {
+  const el = document.getElementById('finance-month-filter');
+  if (el && !el.value) el.value = currentMonthKey();
+  return el?.value || currentMonthKey();
+}
+
 function reportRange() {
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = today.slice(0, 8) + '01';
@@ -3757,7 +3738,7 @@ async function saveCustodySpend() {
 
 function renderMonthlyFinanceTables() {
   const approved = approvedFinanceEntries();
-  const month = currentMonthKey();
+  const month = selectedFinanceMonth();
   const directExpenses = approved.filter(e => e.type === 'مصروف' && inMonth(e.created, month));
   const custodyEntries = approved.filter(e => e.type === 'عهدة');
   const monthCustody = custodyEntries.filter(e => inMonth(e.created, month));
@@ -4353,10 +4334,9 @@ function renderExecutive() {
       </div>
       <div>
         <div class="section">
-          <div style="font-size:15px;font-weight:600;margin-bottom:10px">إدخال سريع</div>
-          <div class="quick-grid">
-            ${['مصروف','عهدة','إيراد','سلفة','دين','تحويل'].map(t => `<button class="btn-secondary" onclick="openQuickEntry('${t}')">${t}</button>`).join('')}
-          </div>
+          <div class="flex-between mb-12"><div style="font-size:15px;font-weight:600">ملخص دفترة المالي</div><button class="btn-secondary" onclick="setTab('finance')">عرض</button></div>
+          ${row('مصروفات دفترة', (daftraFinance.counts?.expenses || 0) + ' سجل مسحوب', statusPill('دفترة', '#85B7EB'))}
+          ${row('خزائن/أرصدة دفترة', (daftraFinance.counts?.accounts || 0) + ' حساب', statusPill('أرصدة', '#5DCAA5'))}
         </div>
         <div class="section">
           <div class="flex-between mb-12"><div style="font-size:15px;font-weight:600">تنبيهات المؤسسة</div><button class="btn-secondary" onclick="setTab('assets')">عرض</button></div>
@@ -4433,7 +4413,7 @@ function renderDaftraFinanceSummary() {
   const payments = Array.isArray(daftraFinance.payments) ? daftraFinance.payments : [];
   const accounts = Array.isArray(daftraFinance.accounts) ? daftraFinance.accounts : [];
   const errors = Array.isArray(daftraFinance.errors) ? daftraFinance.errors : [];
-  const month = currentMonthKey();
+  const month = selectedFinanceMonth();
   const monthExpenses = expenses.filter(e => inMonth(e.date, month));
   const expenseTotal = monthExpenses.reduce((sum, e) => sum + moneyValue(e.amount), 0);
   const monthPayments = payments.filter(e => inMonth(e.date, month));
@@ -4447,11 +4427,25 @@ function renderDaftraFinanceSummary() {
   const recentExpenses = expenses.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
   const recentCustodies = custodies.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
   const recentPayments = payments.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 6);
+  const byCategory = Object.values(monthExpenses.reduce((acc, e) => {
+    const key = e.category || 'غير مصنف';
+    if (!acc[key]) acc[key] = { label: key, count: 0, total: 0 };
+    acc[key].count += 1;
+    acc[key].total += moneyValue(e.amount);
+    return acc;
+  }, {})).sort((a,b) => b.total - a.total);
+  const byAccount = Object.values(monthExpenses.reduce((acc, e) => {
+    const key = e.account || 'حساب غير محدد';
+    if (!acc[key]) acc[key] = { label: key, count: 0, total: 0 };
+    acc[key].count += 1;
+    acc[key].total += moneyValue(e.amount);
+    return acc;
+  }, {})).sort((a,b) => b.total - a.total);
 
   el.innerHTML = `
     <div class="grid-4">
-      <div class="stat-card"><div class="label">مصروفات دفترة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:#9A4A00">${money(expenseTotal)}</div></div>
-      <div class="stat-card"><div class="label">مدفوعات دفترة هذا الشهر</div><div style="font-size:18px;font-weight:800;color:var(--green)">${money(paymentsTotal)}</div></div>
+      <div class="stat-card"><div class="label">مصروفات دفترة ${month}</div><div style="font-size:18px;font-weight:800;color:#9A4A00">${money(expenseTotal)}</div></div>
+      <div class="stat-card"><div class="label">مدفوعات دفترة ${month}</div><div style="font-size:18px;font-weight:800;color:var(--green)">${money(paymentsTotal)}</div></div>
       <div class="stat-card"><div class="label">أرصدة دفترة</div><div style="font-size:18px;font-weight:800;color:var(--text)">${accounts.length ? money(officialBalance) : 'غير متاح'}</div></div>
       <div class="stat-card"><div class="label">متبقي عهد دفترة</div><div style="font-size:18px;font-weight:800;color:${custodyRemaining ? 'var(--red)' : 'var(--green)'}">${money(custodyRemaining)}</div></div>
     </div>
@@ -4463,14 +4457,36 @@ function renderDaftraFinanceSummary() {
     </div>` : ''}
     <div class="grid-2 mt-8">
       <div class="stat-card">
-        <div class="label">آخر مصروفات دفترة</div>
-        ${recentExpenses.length ? recentExpenses.map(e => `<div class="list-row">
+        <div class="label">المصروفات حسب التصنيف</div>
+        ${byCategory.length ? byCategory.slice(0, 10).map(row => `<div class="list-row">
+          <div style="font-weight:700">${htmlEscape(row.label)}</div>
+          <div style="text-align:left">
+            <div style="font-weight:800;color:#9A4A00">${money(row.total)}</div>
+            <div class="text-secondary" style="font-size:10px">${row.count} حركة</div>
+          </div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات في الشهر المختار</div>'}
+      </div>
+      <div class="stat-card">
+        <div class="label">المصروفات حسب الحساب/الخزينة</div>
+        ${byAccount.length ? byAccount.slice(0, 10).map(row => `<div class="list-row">
+          <div style="font-weight:700">${htmlEscape(row.label)}</div>
+          <div style="text-align:left">
+            <div style="font-weight:800;color:#9A4A00">${money(row.total)}</div>
+            <div class="text-secondary" style="font-size:10px">${row.count} حركة</div>
+          </div>
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات في الشهر المختار</div>'}
+      </div>
+    </div>
+    <div class="grid-2 mt-8">
+      <div class="stat-card">
+        <div class="label">مصروفات دفترة في الشهر المختار</div>
+        ${monthExpenses.length ? monthExpenses.slice().sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 12).map(e => `<div class="list-row">
           <div style="min-width:0">
             <div style="font-weight:700">${money(e.amount)} — ${htmlEscape(e.category || e.vendor || 'مصروف')}</div>
             <div class="text-secondary" style="font-size:11px;margin-top:2px">${htmlEscape(e.note || e.vendor || '')}${e.account ? ' — ' + htmlEscape(e.account) : ''}</div>
           </div>
           <div class="text-secondary" style="white-space:nowrap">${dateOnly(e.date)}</div>
-        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات مسحوبة من دفترة</div>'}
+        </div>`).join('') : '<div class="text-secondary" style="font-size:12px">لا توجد مصروفات في الشهر المختار</div>'}
       </div>
       <div class="stat-card">
         <div class="label">آخر مدفوعات دفترة</div>
@@ -4822,7 +4838,6 @@ function renderFinance() {
   const list = document.getElementById('finance-list');
   if (list) list.innerHTML = `
     ${renderInternalNonTaxReceipts()}`;
-  renderSmartAccounting();
 }
 
 function renderOperations() {

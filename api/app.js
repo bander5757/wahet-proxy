@@ -1287,7 +1287,7 @@ function daftraCapabilityRow(key, label, result, count, statusOverride) {
   const supported = !result.error;
   let status = statusOverride || (supported ? "supported" : "error");
   const message = result.error || "";
-  if (/not found|404/i.test(message)) status = "unsupported";
+  if (/not found|404|invalid endpoint/i.test(message)) status = "unsupported";
   if (/unauthor|forbidden|401|403|permission|صلاح/i.test(message)) status = "unauthorized";
   return {
     key,
@@ -1419,14 +1419,14 @@ async function syncDaftraClientsCache(client) {
     return { rows: [], error: errors.join(" | "), base: candidates[0], label };
   }
 
-  const [estimates, invoices, quoteStates, expensesResult, custodiesResult, paymentsResult, accountsResult] = await Promise.all([
+  const unsupportedCustodiesResult = { rows: [], error: "العهد غير متاحة حالياً من API دفترة بالمسارات المختبرة", base: "غير معتمد", label: "العهد" };
+  const unsupportedPaymentsResult = { rows: [], error: "المدفوعات غير متاحة حالياً كمسار مستقل؛ يتم الاعتماد على بيانات الفاتورة إن رجعت المدفوع والمتبقي", base: "غير معتمد", label: "المدفوعات" };
+  const [estimates, invoices, quoteStates, expensesResult, accountsResult] = await Promise.all([
     fetchPages("estimates"),
     fetchPages("invoices"),
     listQuoteStates(client),
     fetchOptionalPages("expenses", "المصروفات"),
-    fetchFirstAvailable(["employee_custodies", "employee-custodies", "custodies"], "العهد"),
-    fetchFirstAvailable(["payments", "receipts", "transactions"], "المدفوعات"),
-    fetchFirstAvailable(["treasuries", "bank_accounts", "accounts"], "الأرصدة"),
+    fetchOptionalPages("treasuries", "الأرصدة"),
   ]);
   const merged = [];
 
@@ -1529,10 +1529,10 @@ async function syncDaftraClientsCache(client) {
   });
 
   const expenses = expensesResult.rows.map(daftraExpenseFrom).filter((row) => row.id || row.amount || row.date);
-  const custodies = custodiesResult.rows.map(daftraCustodyFrom).filter((row) => row.id || row.amount || row.date);
-  const payments = paymentsResult.rows.map(daftraPaymentFrom).filter((row) => row.id || row.amount || row.date);
+  const custodies = [];
+  const payments = [];
   const accounts = accountsResult.rows.map(daftraAccountFrom).filter((row) => row.id || row.name || row.balance);
-  const financeErrors = [expensesResult.error, custodiesResult.error, paymentsResult.error, accountsResult.error].filter(Boolean);
+  const financeErrors = [expensesResult.error, unsupportedCustodiesResult.error, unsupportedPaymentsResult.error, accountsResult.error].filter(Boolean);
   const financeCache = await setDaftraFinanceCache(client, {
     expenses,
     custodies,
@@ -1546,8 +1546,8 @@ async function syncDaftraClientsCache(client) {
     daftraCapabilityRow("estimates", "عروض الأسعار", { base: "estimates", error: null }, estimates.length),
     daftraCapabilityRow("invoices", "الفواتير", { base: "invoices", error: null }, invoices.length),
     daftraCapabilityRow("expenses", "المصروفات", expensesResult, expenses.length),
-    daftraCapabilityRow("custodies", "العهد", custodiesResult, custodies.length),
-    daftraCapabilityRow("payments", "المدفوعات", paymentsResult, payments.length),
+    daftraCapabilityRow("custodies", "العهد", unsupportedCustodiesResult, custodies.length, "unsupported"),
+    daftraCapabilityRow("payments", "المدفوعات", unsupportedPaymentsResult, payments.length, "unsupported"),
     daftraCapabilityRow("accounts", "الأرصدة/الخزائن", accountsResult, accounts.length),
   ]);
 
