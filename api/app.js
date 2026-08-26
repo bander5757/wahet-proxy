@@ -1213,6 +1213,15 @@ async function setSetting(client, key, value) {
   return result.rows[0].value;
 }
 
+function publicDaftraSettings(settings) {
+  if (!settings || typeof settings !== "object") return null;
+  return {
+    subdomain: settings.subdomain || "",
+    proxyUrl: settings.proxyUrl || "/api/daftra",
+    hasKey: Boolean(settings.apikey),
+  };
+}
+
 async function getDaftraClientsCache(client) {
   const cache = await getSetting(client, "daftra_clients_cache");
   if (!cache || !Array.isArray(cache.clients)) {
@@ -1807,7 +1816,7 @@ async function dashboard(client, user) {
     financeMeta,
     chartAccounts,
     settings: {
-      daftra: daftraSettings,
+      daftra: publicDaftraSettings(daftraSettings),
     },
     users: users.rows,
   };
@@ -1932,12 +1941,15 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === "GET" && path === "/settings/daftra") {
-      return res.status(200).json({ ok: true, data: await getSetting(client, "daftra") });
+      return res.status(200).json({ ok: true, data: publicDaftraSettings(await getSetting(client, "daftra")) });
     }
 
     if (req.method === "POST" && path === "/settings/daftra") {
-      const saved = await setSetting(client, "daftra", validateDaftraSettings(req.body || {}));
-      return res.status(200).json({ ok: true, data: saved });
+      const existing = (await getSetting(client, "daftra")) || {};
+      const payload = { ...(req.body || {}) };
+      if (!String(payload.apikey || "").trim() && existing.apikey) payload.apikey = existing.apikey;
+      const saved = await setSetting(client, "daftra", validateDaftraSettings(payload));
+      return res.status(200).json({ ok: true, data: publicDaftraSettings(saved) });
     }
 
     if (req.method === "GET" && path === "/daftra/capabilities") {

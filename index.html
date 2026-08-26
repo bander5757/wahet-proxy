@@ -1974,8 +1974,8 @@ const saveClientState = c => {
     }) }).catch(() => showMsg('⚠️ تم حفظ حالة العرض محلياً وتعذر حفظها في قاعدة البيانات'));
   }
 };
-const normalizedCfg = next => Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra' }, next || {});
-const hasConfig = () => Boolean(cfg.subdomain && cfg.apikey);
+const normalizedCfg = next => Object.assign({ subdomain: '', apikey: '', proxyUrl: '/api/daftra', hasKey: false }, next || {});
+const hasConfig = () => Boolean(cfg.subdomain && (cfg.apikey || cfg.hasKey));
 function resolveDaftraProxyUrl(url) {
   const value = String(url || '').trim();
   if (!value) return '/api/daftra';
@@ -2194,16 +2194,34 @@ function loadConfigUI() {
   document.getElementById('cfg-proxy').value = resolveDaftraProxyUrl(cfg.proxyUrl);
   document.getElementById('cfg-subdomain').value = cfg.subdomain || '';
   document.getElementById('cfg-apikey').value = cfg.apikey || '';
-  setConfigSaveStatus(hasConfig() ? 'إعدادات دفترة محفوظة، لن تحتاج إدخالها كل مرة' : '');
+  setConfigSaveStatus(hasConfig() ? (cfg.apikey ? 'إعدادات دفترة محفوظة، لن تحتاج إدخالها كل مرة' : 'إعدادات دفترة محفوظة في السيرفر، والمفتاح مخفي ولا يظهر في المتصفح') : '');
 }
 
 async function syncDaftra() {
   if (activeTab !== 'clients') { showMsg('⚠️ مزامنة دفترة من تبويب العملاء فقط'); return; }
-  if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ أدخل Subdomain ومفتاح دفترة أولاً'); return; }
-  const proxyUrl = resolveDaftraProxyUrl(cfg.proxyUrl);
   showMsg('⏳ جاري المزامنة مع دفترة...');
   const syncBtn = document.getElementById('sync-btn');
   if (syncBtn) syncBtn.textContent = '⏳';
+  if (apiOnline) {
+    try {
+      const res = await apiRequest('/sync-daftra-cache', { method: 'POST', body: '{}' });
+      await loadAppData();
+      const counts = res.data?.counts || {};
+      const financeCounts = res.data?.financeCounts || {};
+      const lastSync = document.getElementById('last-sync');
+      if (lastSync) lastSync.textContent = 'آخر مزامنة مشتركة: ' + new Date(res.data?.syncedAt || Date.now()).toLocaleTimeString('ar-SA');
+      showMsg('✅ تمت المزامنة — ' + (counts.estimates || 0) + ' عرض سعر، ' + (counts.invoices || 0) + ' فاتورة، ' + (financeCounts.expenses || 0) + ' مصروف');
+      render();
+      if (syncBtn) syncBtn.textContent = '🔄 مزامنة دفترة';
+      return;
+    } catch(err) {
+      showMsg('❌ فشل مزامنة السيرفر: ' + err.message);
+      if (syncBtn) syncBtn.textContent = '🔄 مزامنة دفترة';
+      return;
+    }
+  }
+  if (!cfg.subdomain || !cfg.apikey) { showMsg('⚠️ أدخل Subdomain ومفتاح دفترة أولاً'); if (syncBtn) syncBtn.textContent = '🔄 مزامنة دفترة'; return; }
+  const proxyUrl = resolveDaftraProxyUrl(cfg.proxyUrl);
   try {
     const post = async (ep) => {
       const res = await fetch(proxyUrl, {
