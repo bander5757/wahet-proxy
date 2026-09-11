@@ -188,7 +188,7 @@ function getPool() {
 function sendCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Wahet-User");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Wahet-User, X-Wahet-Token, X-Intake-Secret");
 }
 
 function moneyNumber(value) {
@@ -1776,6 +1776,430 @@ async function renameBankAccount(client, payload, user) {
   return { oldName, newName };
 }
 
+/* ─── WhatsApp Intake (M1): استقبال + تطبيع + allowlist + dedup + تخزين ─── */
+
+// تطبيع رقم الهاتف إلى E.164 (موجّه للسعودية أساساً). يُرجع null إن تعذّر.
+function normalizePhoneE164(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  // تحويل الأرقام العربية/الفارسية إلى لاتينية
+  s = s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+  const isIntl = s.startsWith("+") || s.replace(/[^\d+]/g, "").startsWith("00");
+  let digits = s.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (!isIntl) {
+    if (/^05\d{8}$/.test(digits)) digits = "966" + digits.slice(1);        // 05XXXXXXXX
+    else if (/^5\d{8}$/.test(digits)) digits = "966" + digits;             // 5XXXXXXXX
+    else if (digits.startsWith("966")) { /* رمز الدولة موجود */ }
+    else return null;                                                       // لا نخمّن رمز دولة مجهول
+  }
+  if (digits.length < 8 || digits.length > 15) return null;                 // حدود E.164
+  return "+" + digits;
+}
+
+async function getIntakeAllowlist(client) {
+  const setting = await getSetting(client, "intake_allowlist");
+  return setting && Array.isArray(setting.members) ? setting.members : [];
+}
+
+function findAllowlistMember(members, e164) {
+  return members.find((m) => m && m.active !== false && normalizePhoneE164(m.phone) === e164) || null;
+}
+
+function computeIntakeDedupHash({ e164, messageTimestamp, amount, originalMessage, attachmentUrl }) {
+  const norm = String(originalMessage || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return sha256([e164, messageTimestamp || "", amount == null ? "" : String(amount), norm, attachmentUrl || ""].join("|"));
+}
+
+async function logAgentAction(client, a) {
+  await client.query(
+    `insert into agent_actions
+       (actor_type, actor_ref, actor_name, agent_role, action, target_type, target_id,
+        summary, before_state, after_state, confidence, status)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12)`,
+    [
+      a.actorType || "system", a.actorRef || null, a.actorName || null, a.agentRole || null,
+      a.action, a.targetType || null, a.targetId || null, a.summary || null,
+      a.beforeState != null ? JSON.stringify(a.beforeState) : null,
+      a.afterState != null ? JSON.stringify(a.afterState) : null,
+      a.confidence == null ? null : a.confidence, a.status || "done",
+    ]
+  );
+}
+
+// المنطق الأساسي لاستقبال رسالة WhatsApp. M1 فقط: لا parsing محاسبي، لا finance_entry.
+async function createWhatsappIntake(client, payload) {
+  const provider = String(payload.provider || "peach").trim() || "peach";
+  const providerMessageId = payload.provider_message_id != null ? String(payload.provider_message_id).trim()
+    : (payload.message_id != null ? String(payload.message_id).trim() : "");
+  const senderName = payload.sender_name != null ? String(payload.sender_name).trim() : null;
+  const originalMessage = payload.original_message != null ? String(payload.original_message)
+    : (payload.text != null ? String(payload.text) : "");
+  const source = String(payload.source || "whatsapp").trim() || "whatsapp";
+  const messageTimestamp = payload.message_timestamp || null;
+  const attachmentUrl = payload.attachment_url ? String(payload.attachment_url) : null;
+  const amount = payload.amount != null && payload.amount !== "" ? Number(payload.amount) : null;
+
+  // الحقول المطلوبة
+  if (!payload.sender_phone || !String(payload.sender_phone).trim()) {
+    const e = new Error("sender_phone مطلوب"); e.statusCode = 400; throw e;
+  }
+  if (!originalMessage || !originalMessage.trim()) {
+    const e = new Error("original_message مطلوب"); e.statusCode = 400; throw e;
+  }
+
+  // تطبيع E.164 قبل allowlist/dedup/التخزين
+  const e164 = normalizePhoneE164(payload.sender_phone);
+  if (!e164) { const e = new Error("رقم الهاتف غير صالح (تعذّر تطبيعه إلى E.164)"); e.statusCode = 400; throw e; }
+
+  // allowlist — رقم غير موثوق: لا إدخال مالي، لا finance_entry، رفض واضح
+  const members = await getIntakeAllowlist(client);
+  const member = findAllowlistMember(members, e164);
+  if (!member) {
+    await logAgentAction(client, {
+      actorType: "system", action: "intake.reject_untrusted", targetType: "whatsapp_intake",
+      summary: `رفض رسالة من رقم غير موثوق: ${e164}`,
+    });
+    return { status: "rejected", reason: "untrusted_sender", stored: false, sender_phone: e164 };
+  }
+
+  // منع التكرار — أولاً (provider + provider_message_id)
+  if (providerMessageId) {
+    const dup = await client.query(
+      "select id, status from whatsapp_intake where provider = $1 and provider_message_id = $2 limit 1",
+      [provider, providerMessageId]
+    );
+    if (dup.rows[0]) return { status: "duplicate", reason: "provider_message_id", stored: false, existingId: dup.rows[0].id };
+  }
+  // ثم dedup_hash (بصمة احتياطية)
+  const dedupHash = computeIntakeDedupHash({ e164, messageTimestamp, amount, originalMessage, attachmentUrl });
+  const dupH = await client.query("select id from whatsapp_intake where dedup_hash = $1 limit 1", [dedupHash]);
+  if (dupH.rows[0]) return { status: "duplicate", reason: "dedup_hash", stored: false, existingId: dupH.rows[0].id };
+
+  // إدراج — status='new' (لا تحليل محاسبي في M1)
+  try {
+    const ins = await client.query(
+      `insert into whatsapp_intake
+         (provider, provider_message_id, sender_phone, sender_name, original_message,
+          message_timestamp, source, raw_payload, dedup_hash, status)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'new')
+       returning id`,
+      [provider, providerMessageId || null, e164, senderName, originalMessage,
+       messageTimestamp, source, JSON.stringify(payload || {}), dedupHash]
+    );
+    const id = ins.rows[0].id;
+    await logAgentAction(client, {
+      actorType: "system", action: "intake.receive", targetType: "whatsapp_intake", targetId: id,
+      summary: `استلام رسالة من ${e164}${member.name ? " (" + member.name + ")" : ""}`,
+    });
+    return { status: "new", stored: true, id, sender_phone: e164 };
+  } catch (err) {
+    if (err.code === "23505") return { status: "duplicate", reason: "unique_violation", stored: false };
+    throw err;
+  }
+}
+
+/* ─── WhatsApp Intake Review (M2): صندوق واتساب + مراجعة بشرية ─── */
+
+function intakeRow(row) {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerMessageId: row.provider_message_id || "",
+    sender_phone: row.sender_phone,
+    sender_name: row.sender_name || "",
+    original_message: row.original_message || "",
+    message_timestamp: row.message_timestamp,
+    classification: row.classification || "",
+    amount: row.amount == null ? null : moneyNumber(row.amount),
+    currency: row.currency || "SAR",
+    confidence_score: row.confidence_score == null ? null : Number(row.confidence_score),
+    missing_fields: Array.isArray(row.missing_fields) ? row.missing_fields : [],
+    source_account_id: row.source_account_id || null,
+    source_account_name: row.source_account_name || "",
+    destination_account_id: row.destination_account_id || null,
+    destination_account_name: row.destination_account_name || "",
+    supplier_name: row.supplier_name || "",
+    project_name: row.project_name || "",
+    status: row.status,
+    rejection_reason: row.rejection_reason || "",
+    parsed_data: row.parsed_data || null,
+    final_data: row.final_data || null,
+    reviewed_by: row.reviewed_by || null,
+    reviewed_by_name: row.reviewed_by_name || "",
+    reviewed_at: row.reviewed_at || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+const INTAKE_SELECT = `
+  select wi.*, sa.name as source_account_name, da.name as destination_account_name, u.name as reviewed_by_name
+  from whatsapp_intake wi
+  left join bank_accounts sa on sa.id = wi.source_account_id
+  left join bank_accounts da on da.id = wi.destination_account_id
+  left join app_users u on u.id = wi.reviewed_by`;
+
+async function listIntake(client, { status } = {}) {
+  const params = [];
+  let where = "";
+  if (status) { params.push(status); where = "where wi.status = $1"; }
+  const result = await client.query(`${INTAKE_SELECT} ${where} order by wi.created_at desc limit 200`, params);
+  return result.rows.map(intakeRow);
+}
+
+async function getIntake(client, id) {
+  const result = await client.query(`${INTAKE_SELECT} where wi.id = $1 limit 1`, [String(id || "")]);
+  if (!result.rows[0]) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+  return intakeRow(result.rows[0]);
+}
+
+function requireIntakeApprover(user) {
+  if (!user || !["owner", "accountant"].includes(user.role)) {
+    const e = new Error("ليس لديك صلاحية مراجعة/اعتماد صندوق واتساب");
+    e.statusCode = 403; throw e;
+  }
+}
+
+// الحقول القابلة للمراجعة فقط — parsed_data لا يُمَس أبداً
+const INTAKE_EDITABLE = [
+  "classification", "amount", "currency", "suggested_chart_account_id",
+  "source_account_id", "destination_account_id", "customer_id", "vehicle_id",
+  "quote_id", "supplier_name", "project_name",
+];
+const INTAKE_REVIEWABLE_STATES = ["new", "parsed", "needs_review"];
+
+async function updateIntake(client, payload, user) {
+  requireIntakeApprover(user);
+  const id = String(payload.id || "").trim();
+  if (!id) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  const before = await getIntake(client, id);
+  if (!INTAKE_REVIEWABLE_STATES.includes(before.status)) {
+    const e = new Error(`لا يمكن تعديل سجل بحالة ${before.status}`); e.statusCode = 409; throw e;
+  }
+  const sets = []; const params = []; let i = 1;
+  for (const f of INTAKE_EDITABLE) {
+    if (payload[f] !== undefined) { sets.push(`${f} = $${i++}`); params.push(payload[f] === "" ? null : payload[f]); }
+  }
+  if (payload.final_data !== undefined) { sets.push(`final_data = $${i++}::jsonb`); params.push(JSON.stringify(payload.final_data)); }
+  if (!sets.length) { const e = new Error("لا حقول للتعديل"); e.statusCode = 400; throw e; }
+  sets.push("updated_at = now()");
+  params.push(id);
+  await client.query(`update whatsapp_intake set ${sets.join(", ")} where id = $${i}`, params);
+  const after = await getIntake(client, id);
+  await logAgentAction(client, {
+    actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "accounting",
+    action: "intake.edit", targetType: "whatsapp_intake", targetId: id,
+    beforeState: before, afterState: after, summary: "تعديل حقول المراجعة",
+  });
+  return after;
+}
+
+async function approveIntake(client, payload, user) {
+  requireIntakeApprover(user);
+  const id = String(payload.id || "").trim();
+  if (!id) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  const before = await getIntake(client, id);
+  if (!INTAKE_REVIEWABLE_STATES.includes(before.status)) {
+    const e = new Error(`لا يمكن اعتماد سجل بحالة ${before.status}`); e.statusCode = 409; throw e;
+  }
+  // M2: اعتماد فقط — لا يُنشأ finance_entry هنا
+  await client.query(
+    "update whatsapp_intake set status='approved', reviewed_by=$1, reviewed_at=now(), updated_at=now() where id=$2",
+    [user.id, id]
+  );
+  const after = await getIntake(client, id);
+  await logAgentAction(client, {
+    actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "accounting",
+    action: "intake.approve", targetType: "whatsapp_intake", targetId: id,
+    beforeState: before, afterState: after, summary: "اعتماد الحركة (بلا إنشاء قيد مالي في M2)",
+  });
+  return after;
+}
+
+async function rejectIntake(client, payload, user) {
+  requireIntakeApprover(user);
+  const id = String(payload.id || "").trim();
+  const reason = String(payload.rejection_reason || payload.reason || "").trim();
+  if (!id) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  if (!reason) { const e = new Error("سبب الرفض مطلوب"); e.statusCode = 400; throw e; }
+  const before = await getIntake(client, id);
+  if (!INTAKE_REVIEWABLE_STATES.includes(before.status)) {
+    const e = new Error(`لا يمكن رفض سجل بحالة ${before.status}`); e.statusCode = 409; throw e;
+  }
+  await client.query(
+    "update whatsapp_intake set status='rejected', rejection_reason=$1, reviewed_by=$2, reviewed_at=now(), updated_at=now() where id=$3",
+    [reason, user.id, id]
+  );
+  const after = await getIntake(client, id);
+  await logAgentAction(client, {
+    actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "accounting",
+    action: "intake.reject", targetType: "whatsapp_intake", targetId: id,
+    beforeState: before, afterState: after, summary: `رفض: ${reason}`,
+  });
+  return after;
+}
+
+/* ─── AI Parsing للـ whatsapp_intake (M2.5): new → parsed | needs_review ─── */
+
+function toLatinDigits(s) {
+  return String(s || "").replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+                        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+}
+
+function extractIntakeAmount(text) {
+  const t = toLatinDigits(text);
+  const withCur = [...t.matchAll(/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:ر\.?\s?س|ريال|sar)/gi)]
+    .map((m) => Number(m[1].replace(",", "."))).filter((n) => n > 0);
+  if (withCur.length) return withCur[0];
+  const withWord = [...t.matchAll(/(?:مبلغ|بمبلغ|دفعت|حولت|حوّلت|سدد|سدّد|تحصيل|عهدة|عهده|صرف|مصروف)\s*([0-9]+(?:[.,][0-9]{1,2})?)/gi)]
+    .map((m) => Number(m[1].replace(",", "."))).filter((n) => n > 0);
+  if (withWord.length) return withWord[0];
+  const any = [...t.matchAll(/[0-9]+(?:[.,][0-9]{1,2})?/g)].map((m) => Number(m[0].replace(",", "."))).filter((n) => n > 0);
+  return any.length ? any[0] : null;
+}
+
+// تصنيف بقواعد حتمية (fallback مستقل عن أي مزوّد AI)
+function ruleClassify(text) {
+  const t = toLatinDigits(String(text || "")).toLowerCase();
+  const has = (...ws) => ws.some((w) => t.includes(w));
+  let classification = "unknown";
+  const isTransfer = has("تحويل داخلي", "تحويل بين") ||
+    ((has("تحويل", "حولت", "حوّلت")) && /من\s[\s\S]*(الى|إلى)\s/.test(t));
+  if (isTransfer) classification = "internal_transfer";
+  else if (has("عهدة", "عهده", "سلفة تشغيل", "سلفه تشغيل")) classification = "custody";
+  else if (has("استرجاع", "استرداد", "مرتجع", "رد مبلغ", "ريفند")) classification = "refund";
+  else if (has("دفعة عميل", "تحصيل", "حصلت", "استلمت", "سدد العميل", "سدّد العميل", "إيراد", "ايراد", "وصلني")) classification = "receipt";
+  else if (has("مصروف", "صرف", "دفعت", "اشتريت", "شراء", "فاتورة", "بنزين", "ديزل", "وقود", "صيانة", "زيت", "أجرة", "اجرة", "عمالة", "مواد")) classification = "expense";
+  return { classification, amount: extractIntakeAmount(text), currency: "SAR", supplier_name: null, project_name: null };
+}
+
+// abstraction لمزوّد AI: كل مزوّد يوفّر classify(text)؛ قواعد الحسابات/الحالة عامة بعده
+function ruleIntakeParser() {
+  return { name: "rule", async classify(text) { return ruleClassify(text); } };
+}
+function claudeIntakeParser() {
+  return {
+    name: "claude-haiku",
+    async classify(text) {
+      try {
+        const Anthropic = require("@anthropic-ai/sdk");
+        const c = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await c.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 300,
+          messages: [{ role: "user", content:
+`صنّف رسالة مالية داخلية لمؤسسة تأجير خيام. أعِد JSON فقط بدون أي نص:
+{"classification":"expense|receipt|internal_transfer|custody|refund|unknown","amount":number|null,"currency":"SAR","supplier_name":string|null,"project_name":string|null}
+الرسالة:
+${text}` }],
+        });
+        const raw = msg.content[0]?.text?.trim() || "";
+        const j = raw.match(/\{[\s\S]*\}/)?.[0];
+        const p = j ? JSON.parse(j) : {};
+        const cls = ["expense", "receipt", "internal_transfer", "custody", "refund", "unknown"].includes(p.classification) ? p.classification : "unknown";
+        return { classification: cls, amount: p.amount != null ? Number(p.amount) : extractIntakeAmount(text), currency: p.currency || "SAR", supplier_name: p.supplier_name || null, project_name: p.project_name || null };
+      } catch (e) {
+        return ruleClassify(text); // fallback حتمي عند فشل المزوّد
+      }
+    },
+  };
+}
+function getIntakeParser() {
+  if (process.env.ANTHROPIC_API_KEY && process.env.INTAKE_PARSER !== "rule") return claudeIntakeParser();
+  return ruleIntakeParser();
+}
+
+function intakeAccountTokens(name) {
+  return String(name || "").split(/\s+/).map((w) => w.trim()).filter((w) => w && w !== "حساب" && w.length >= 3);
+}
+// استخراج الحسابات من النص بالاتجاه (من ⇒ source، إلى/لحساب ⇒ destination). لا تخمين بلا ذكر صريح.
+function resolveAccountsFromText(text, accounts) {
+  const t = toLatinDigits(String(text || ""));
+  let source = null, dest = null;
+  for (const a of accounts) {
+    let idx = -1;
+    for (const tok of intakeAccountTokens(a.name)) { const k = t.indexOf(tok); if (k >= 0) { idx = k; break; } }
+    if (idx < 0) continue;
+    const before = t.slice(Math.max(0, idx - 12), idx);
+    if (/الى|إلى|لحساب/.test(before)) { if (!dest) dest = a.id; }
+    else if (/من/.test(before)) { if (!source) source = a.id; }
+  }
+  return { source_account_id: source, destination_account_id: dest };
+}
+
+// قواعد الحسابات + missing_fields + confidence + status (عامة لكل المزوّدين)
+function finalizeIntakeParse(base, accIds, parserName) {
+  const classification = base.classification || "unknown";
+  const amount = base.amount != null ? base.amount : null;
+  const source = accIds.source_account_id || null;
+  const dest = accIds.destination_account_id || null;
+  const missing = [];
+  if (amount == null) missing.push("amount");
+  if (classification === "expense" && !source) missing.push("source_account_id");
+  if (classification === "receipt" && !dest) missing.push("destination_account_id");
+  if (classification === "internal_transfer") {
+    if (!source) missing.push("source_account_id");
+    if (!dest) missing.push("destination_account_id");
+  }
+  let conf;
+  if (classification === "unknown") conf = 0.2;
+  else {
+    conf = 0.5 + 0.2;                       // تصنيف معروف
+    if (amount != null) conf += 0.15;
+    const need = classification === "expense" ? ["s"] : classification === "receipt" ? ["d"]
+      : classification === "internal_transfer" ? ["s", "d"] : [];
+    if (need.length) { if (need.every((k) => (k === "s" ? source : dest))) conf += 0.15; }
+    else conf += 0.1;                        // custody/refund بلا حساب إلزامي
+  }
+  conf = Math.max(0, Math.min(1, Number(conf.toFixed(3))));
+  const status = (missing.length > 0 || conf < 0.6 || classification === "unknown") ? "needs_review" : "parsed";
+  const parsed_data = {
+    classification, amount, currency: base.currency || "SAR",
+    source_account_id: source, destination_account_id: dest,
+    supplier_name: base.supplier_name || null, project_name: base.project_name || null,
+    confidence_score: conf, missing_fields: missing, parser: parserName,
+  };
+  return { parsed_data, classification, amount, currency: base.currency || "SAR",
+    source_account_id: source, destination_account_id: dest,
+    supplier_name: base.supplier_name || null, project_name: base.project_name || null,
+    confidence: conf, missing_fields: missing, status };
+}
+
+// يحلّل سجلاً بحالة new فقط، ويحفظ parsed_data (أول تحليل، immutable) دون لمس final_data.
+async function parseIntake(client, id, opts = {}) {
+  const idS = String(id || "").trim();
+  if (!idS) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  const row = (await client.query("select id, status, original_message, parsed_data from whatsapp_intake where id = $1", [idS])).rows[0];
+  if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+  if (row.status !== "new") { const e = new Error(`لا يمكن تحليل سجل بحالة ${row.status}`); e.statusCode = 409; throw e; }
+  const parser = opts.parser || getIntakeParser();
+  const base = await parser.classify(row.original_message || "");
+  const accounts = (await client.query("select id, name from bank_accounts where is_active = true")).rows;
+  const accIds = resolveAccountsFromText(row.original_message || "", accounts);
+  const fin = finalizeIntakeParse(base, accIds, parser.name);
+  await client.query(
+    `update whatsapp_intake set
+       classification = $1, amount = $2, currency = $3, source_account_id = $4, destination_account_id = $5,
+       supplier_name = $6, project_name = $7, confidence_score = $8, missing_fields = $9,
+       parsed_data = coalesce(parsed_data, $10::jsonb), status = $11, updated_at = now()
+     where id = $12`,
+    [fin.classification, fin.amount, fin.currency, fin.source_account_id, fin.destination_account_id,
+     fin.supplier_name, fin.project_name, fin.confidence, fin.missing_fields,
+     JSON.stringify(fin.parsed_data), fin.status, idS]
+  );
+  await logAgentAction(client, {
+    actorType: "agent", actorName: parser.name, agentRole: "accounting", action: "intake.parse",
+    targetType: "whatsapp_intake", targetId: idS, confidence: fin.confidence,
+    afterState: { classification: fin.classification, status: fin.status, missing_fields: fin.missing_fields },
+    summary: `تحليل: ${fin.classification} (${Math.round(fin.confidence * 100)}%) → ${fin.status}`,
+  });
+  return await getIntake(client, idS);
+}
+
 async function dashboard(client, user) {
   const finance = await listFinance(client);
   const quoteStates = await listQuoteStates(client);
@@ -1851,6 +2275,44 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/auth/login") {
       return res.status(200).json({ ok: true, data: await login(client, req.body || {}) });
+    }
+
+    // WhatsApp Intake (M1): استقبال آلي عبر مفتاح خدمة (machine-to-machine)
+    if (req.method === "POST" && path === "/intake/whatsapp") {
+      const secret = process.env.INTAKE_SECRET;
+      if (!secret) return res.status(503).json({ ok: false, error: "INTAKE_SECRET غير مُعد على الخادم" });
+      if (String(req.headers["x-intake-secret"] || "") !== secret) {
+        return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
+      }
+      const data = await createWhatsappIntake(client, req.body || {});
+      return res.status(data.stored ? 201 : 200).json({ ok: true, data });
+    }
+
+    // WhatsApp Intake Review (M2) — شاشة الصندوق والمراجعة البشرية (جلسة مستخدم)
+    if (req.method === "GET" && path === "/intake") {
+      requireIntakeApprover(user); // M2.5: القراءة أيضاً محصورة بـ owner/accountant
+      return res.status(200).json({ ok: true, data: await listIntake(client, { status: query.status }) });
+    }
+    if (req.method === "GET" && path.startsWith("/intake/") && path !== "/intake/whatsapp") {
+      requireIntakeApprover(user);
+      const id = decodeURIComponent(path.slice("/intake/".length));
+      return res.status(200).json({ ok: true, data: await getIntake(client, id) });
+    }
+    if (req.method === "POST" && path === "/intake/update") {
+      return res.status(200).json({ ok: true, data: await updateIntake(client, req.body || {}, user) });
+    }
+    if (req.method === "POST" && path === "/intake/approve") {
+      return res.status(200).json({ ok: true, data: await approveIntake(client, req.body || {}, user) });
+    }
+    if (req.method === "POST" && path === "/intake/reject") {
+      return res.status(200).json({ ok: true, data: await rejectIntake(client, req.body || {}, user) });
+    }
+    // M2.5: تحليل AI لسجل وارد (يشغّله الوكيل بمفتاح الخدمة أو مخوّل بشري)
+    if (req.method === "POST" && path === "/intake/parse") {
+      const secret = process.env.INTAKE_SECRET;
+      const bySecret = secret && String(req.headers["x-intake-secret"] || "") === secret;
+      if (!bySecret) requireIntakeApprover(user);
+      return res.status(200).json({ ok: true, data: await parseIntake(client, (req.body || {}).id) });
     }
 
     if (req.method === "GET" && (path === "/" || path === "" || path === "/bootstrap")) {
@@ -1936,6 +2398,11 @@ module.exports = async function handler(req, res) {
     }
 
     if ((req.method === "POST" || req.method === "GET") && path === "/tenders/radar-scan") {
+      // حارس تعطيل الرادار/الـcron على staging فقط (DISABLE_CRON=1 يُضبط في env المشروع البعيد).
+      // عند تفعيله: لا اتصال بـEtimad، لا Anthropic، لا كتابة في القاعدة. الإنتاج لا يضبط المتغير ⇒ سلوكه دون تغيير.
+      if (process.env.DISABLE_CRON === "1") {
+        return res.status(200).json({ ok: true, skipped: true, reason: "cron_disabled" });
+      }
       const radar = await scanEtimadTenders(client);
       return res.status(200).json({ ok: true, data: radar });
     }
@@ -2204,4 +2671,19 @@ module.exports = async function handler(req, res) {
   } finally {
     if (client) client.release();
   }
+};
+
+// تصدير دوال M1 الداخلية لأغراض الاختبار فقط (لا يؤثر على handler الافتراضي في Vercel)
+module.exports.__m1 = {
+  normalizePhoneE164, computeIntakeDedupHash, createWhatsappIntake,
+  getIntakeAllowlist, findAllowlistMember,
+};
+// دوال M2 (مراجعة الصندوق) لأغراض الاختبار فقط
+module.exports.__m2 = {
+  listIntake, getIntake, updateIntake, approveIntake, rejectIntake, intakeRow,
+};
+// دوال M2.5 (تحليل AI) لأغراض الاختبار فقط
+module.exports.__m25 = {
+  parseIntake, ruleClassify, finalizeIntakeParse, resolveAccountsFromText,
+  ruleIntakeParser, getIntakeParser, extractIntakeAmount,
 };

@@ -223,3 +223,111 @@ create index if not exists idx_vehicle_tasks_due_on on vehicle_tasks(due_on);
 create index if not exists idx_general_alerts_due_on on general_alerts(due_on);
 create index if not exists idx_tenders_due_on on tenders(due_on);
 create unique index if not exists idx_tenders_external_key on tenders(external_key) where external_key is not null;
+
+-- WhatsApp Intake (Peach → Claude → مراجعة بشرية → finance).
+-- سجلات الوارد تعيش هنا فقط ولا تدخل أي إجمالي مالي إلا بعد الاعتماد (ينشأ finance_entry).
+-- ملاحظة تطبيقية: الـAPI يجب أن يطبّع sender_phone إلى E.164 قبل allowlist matching
+-- والـdedup والتخزين. لا نفرض regex/check معقّداً في DB الآن.
+create table if not exists whatsapp_intake (
+  id                     uuid primary key default gen_random_uuid(),
+
+  -- المصدر والهوية (dedup)
+  provider               text not null default 'peach',   -- المزوّد (peach، وغيره مستقبلاً)
+  provider_message_id    text,                             -- معرّف الرسالة لدى المزوّد
+  sender_phone           text not null,                    -- يُخزَّن دائماً E.164 مطبَّعاً (مسؤولية الـAPI)
+  sender_name            text,                             -- مساعِد فقط، لا يُعتمد للهوية
+  original_message       text,
+  message_timestamp      timestamptz,
+  source                 text not null default 'whatsapp',
+
+  -- تحليل الوكيل
+  parsed_data            jsonb,          -- تحليل Claude الأصلي كما خرج أول مرة (immutable تطبيقياً بعد الحفظ)
+  final_data             jsonb,          -- البيانات النهائية بعد الاستكمال/التصحيح البشري (للمقارنة وقياس الدقة)
+  classification         text,           -- expense/customer_payment/supplier_payment/custody/purchase/
+                                        -- fuel/maintenance/salary/project_cost/operational_update/
+                                        -- vehicle_update/inventory/other
+  amount                 numeric(12,2),
+  currency               text default 'SAR',
+  confidence_score       numeric(4,3),   -- 0..1
+  missing_fields         text[],         -- الحقول الناقصة (needs_review + طلب الحقل المفقود)
+  suggested_chart_account_id uuid references chart_accounts(id),  -- اقتراح، يؤكده المراجِع
+
+  -- الحسابات (نموذج مزدوج الطرف): source عند الخروج/التحويل، destination عند الدخول/التحويل.
+  -- اقتراح الوكيل يؤكده المراجِع. التحويل الداخلي يملأ الطرفين ولا يُعدّ إيراداً/مصروفاً.
+  source_account_id      uuid references bank_accounts(id),
+  destination_account_id uuid references bank_accounts(id),
+
+  -- روابط اختيارية (تبقى null إن لم تُحل — لا جداول suppliers/projects جديدة الآن)
+  customer_id            uuid references customers(id),
+  vehicle_id             uuid references vehicles(id),
+  quote_id               uuid references rental_quotes(id),   -- أقرب مفهوم "مشروع" حالياً
+  supplier_name          text,                                -- نص وصفي فقط
+  project_name           text,                                -- نص وصفي فقط
+
+  -- المرفقات (مرجع فقط — لا ندّعي تخزيناً دائماً في M0/M1)
+  attachment_url         text,          -- Peach media URL إن وفّره
+  attachment_name        text,
+  attachment_mime        text,
+  attachment_meta        jsonb,
+
+  -- دورة الحياة (= processing status للـintake)
+  status                 text not null default 'new'
+    check (status in ('new','parsed','needs_review','approved','rejected','synced','duplicate','failed')),
+  rejection_reason       text,
+  reviewed_by            uuid references app_users(id),  -- من راجع/صحّح/اعتمد (بشري)
+  reviewed_at            timestamptz,
+
+  -- الربط والتدقيق
+  finance_entry_id       uuid references finance_entries(id),  -- بعد الاعتماد
+  daftra_sync_status     text not null default 'none'
+    check (daftra_sync_status in ('none','pending','synced','na')),
+  daftra_id              text,
+  dedup_hash             text,          -- sha256(sender_phone + message_timestamp + amount + normalized_text|media_ref)
+  raw_payload            jsonb,         -- الحمولة الخام كما وصلت (غير parsed_data)
+  error_message          text,          -- عند status='failed'
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+
+  constraint chk_intake_confidence check (
+    confidence_score is null or (confidence_score >= 0 and confidence_score <= 1)
+  )
+);
+
+-- منع التكرار حسب (المزوّد + معرّف رسالته)؛ نفس message_id قد يتكرر بين مزوّدين مختلفين.
+create unique index if not exists idx_intake_provider_msg
+  on whatsapp_intake(provider, provider_message_id) where provider_message_id is not null;
+-- بصمة احتياطية مستقلة عند غياب المعرّف.
+create unique index if not exists idx_intake_dedup
+  on whatsapp_intake(dedup_hash) where dedup_hash is not null;
+create index if not exists idx_intake_status  on whatsapp_intake(status);
+create index if not exists idx_intake_created on whatsapp_intake(created_at desc);
+
+-- Audit Trail موحّد لكل الوكلاء (المحاسبة أولاً، ثم المبيعات/التشغيل/المناقصات لاحقاً).
+-- يسجّل ما فعله وكيل أو بشر: الفعل، الهدف، قبل/بعد، الثقة، الحالة. لا حذف — سجل تدقيق دائم.
+create table if not exists agent_actions (
+  id            uuid primary key default gen_random_uuid(),
+  actor_type    text not null check (actor_type in ('agent', 'human', 'system')),
+  actor_ref     text,          -- app_users.id للبشر، أو معرّف/اسم الوكيل للآلة
+  actor_name    text,          -- اسم مقروء (للعرض في التدقيق)
+  agent_role    text,          -- 'accounting' | 'sales' | 'operations' | 'tenders' | ...
+  action        text not null, -- 'intake.parse' | 'intake.approve' | 'alert.send' | 'reconcile.propose' | 'anomaly.flag' | ...
+  target_type   text,          -- 'whatsapp_intake' | 'finance_entry' | 'reconciliation_match' | ...
+  target_id     text,
+  summary       text,
+  before_state  jsonb,
+  after_state   jsonb,
+  confidence    numeric(4,3),  -- 0..1 عند وجود قرار آلي
+  status        text not null default 'done'
+    check (status in ('proposed', 'done', 'failed', 'superseded')),
+  error_message text,
+  created_at    timestamptz not null default now(),
+
+  constraint chk_agent_actions_confidence check (
+    confidence is null or (confidence >= 0 and confidence <= 1)
+  )
+);
+
+create index if not exists idx_agent_actions_target  on agent_actions(target_type, target_id);
+create index if not exists idx_agent_actions_created on agent_actions(created_at desc);
+create index if not exists idx_agent_actions_actor   on agent_actions(actor_type, agent_role);
+create index if not exists idx_agent_actions_action  on agent_actions(action);

@@ -337,6 +337,7 @@
   <button class="tab-btn active" onclick="setTab('home')">الرئيسية</button>
   <button class="tab-btn" onclick="setTab('clients')">العملاء</button>
   <button class="tab-btn" onclick="setTab('finance')">المحاسبة</button>
+  <button class="tab-btn" onclick="setTab('intake')">📨 صندوق واتساب</button>
   <button class="tab-btn" onclick="setTab('ops')">التركيبات</button>
   <button class="tab-btn" onclick="setTab('assets')">الموظفين والسيارات</button>
   <button class="tab-btn" onclick="setTab('tenders')">المنافسات</button>
@@ -357,6 +358,7 @@
     <button class="active" onclick="setTab('home')"><span>🏠</span><span>الرئيسية</span></button>
     <button onclick="setTab('clients')"><span>👥</span><span>العملاء</span></button>
     <button onclick="setTab('finance')"><span>💰</span><span>المحاسبة</span></button>
+    <button onclick="setTab('intake')"><span>📨</span><span>صندوق واتساب</span></button>
     <button onclick="setTab('ops')"><span>🔧</span><span>التركيبات</span></button>
     <button onclick="setTab('assets')"><span>🔔</span><span>الموظفين والسيارات</span></button>
     <button onclick="setTab('tenders')"><span>🎯</span><span>المنافسات</span></button>
@@ -511,6 +513,30 @@
       <div id="accounting-guide-view"></div>
     </div>
     <div id="finance-list" class="mt-8"></div>
+  </div>
+</div>
+
+<div id="tab-intake" class="tab-page">
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">📨 صندوق واتساب</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">مراجعة الرسائل الواردة قبل اعتمادها. لا تدخل المالية إلا بعد الاعتماد البشري.</div>
+      </div>
+      <div style="min-width:150px">
+        <div class="label">الحالة</div>
+        <select id="intake-status-filter" onchange="loadIntake()">
+          <option value="">الكل</option>
+          <option value="new">جديد</option>
+          <option value="parsed">محلَّل</option>
+          <option value="needs_review">يحتاج مراجعة</option>
+          <option value="approved">معتمد</option>
+          <option value="rejected">مرفوض</option>
+          <option value="duplicate">مكرر</option>
+        </select>
+      </div>
+    </div>
+    <div id="intake-list" class="mt-8"></div>
   </div>
 </div>
 
@@ -953,6 +979,7 @@
   <button class="active" onclick="setTab('home')"><span class="bn-icon">🏠</span><span>الرئيسية</span></button>
   <button onclick="setTab('clients')"><span class="bn-icon">👥</span><span>العملاء</span></button>
   <button onclick="setTab('finance')"><span class="bn-icon">📊</span><span>المحاسبة</span></button>
+  <button onclick="setTab('intake')"><span class="bn-icon">📨</span><span>الصندوق</span></button>
   <button onclick="setTab('ops')"><span class="bn-icon">🔧</span><span>التركيبات</span></button>
   <button onclick="setTab('assets')"><span class="bn-icon">🚗</span><span>الموظفين</span></button>
   <button onclick="setTab('tenders')"><span class="bn-icon">🤖</span><span>المنافسات</span></button>
@@ -2644,6 +2671,7 @@ function setTab(tab) {
   document.querySelectorAll('#bottom-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   document.querySelectorAll('#side-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   closeSideMenu();
+  if (tab === 'intake') loadIntake();
   if (tab !== 'clients') {
     const settingsPanel = document.getElementById('settings-panel');
     if (settingsPanel) settingsPanel.style.display = 'none';
@@ -5632,6 +5660,84 @@ function renderClientOverview() {
   monthlyEl.innerHTML = monthHtml || noDateHtml ? monthHtml + noDateHtml : '<div class="text-secondary" style="font-size:12px">لا توجد عروض أسعار بتاريخ مسجل</div>';
 }
 
+/* ─── صندوق واتساب (M2): مراجعة بشرية للوارد ─── */
+let intakeItems = [];
+const INTAKE_STATUS_LABELS = { new:'جديد', parsed:'محلَّل', needs_review:'يحتاج مراجعة', approved:'معتمد', rejected:'مرفوض', synced:'مُرحّل', duplicate:'مكرر', failed:'فشل' };
+function canApproveIntake() { return !!currentUser && ['owner','accountant'].includes(currentUser.role); }
+async function loadIntake() {
+  const el = document.getElementById('intake-list');
+  if (!apiOnline) { if (el) el.innerHTML = '<div class="text-secondary" style="font-size:12px;padding:8px">يتطلب اتصال قاعدة البيانات</div>'; return; }
+  try {
+    const status = document.getElementById('intake-status-filter')?.value || '';
+    const res = await apiRequest('/intake' + (status ? ('?status=' + encodeURIComponent(status)) : ''));
+    intakeItems = Array.isArray(res.data) ? res.data : [];
+    renderIntake();
+  } catch(e) { showMsg('تعذر تحميل صندوق واتساب: ' + e.message); }
+}
+function renderIntake() {
+  const el = document.getElementById('intake-list');
+  if (!el) return;
+  const canReview = canApproveIntake();
+  if (!intakeItems.length) { el.innerHTML = '<div class="text-secondary" style="font-size:12px;padding:8px">لا توجد رسائل</div>'; return; }
+  el.innerHTML = intakeItems.map(it => {
+    const st = INTAKE_STATUS_LABELS[it.status] || it.status;
+    const canAct = canReview && ['new','parsed','needs_review'].includes(it.status);
+    const conf = it.confidence_score == null ? '—' : Math.round(it.confidence_score * 100) + '%';
+    const miss = (it.missing_fields || []).length ? (it.missing_fields || []).join('، ') : '—';
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="flex-between mb-8">
+        <div><span style="font-size:13px;font-weight:600">${htmlEscape(it.sender_name || '—')}</span>
+        <span style="font-size:11px;color:#9a9898"> · ${htmlEscape(it.sender_phone || '')}</span></div>
+        <span class="badge" style="font-size:10px">${htmlEscape(st)}</span>
+      </div>
+      <div style="font-size:13px;white-space:pre-wrap;margin-bottom:8px">${htmlEscape(it.original_message || '')}</div>
+      <div class="grid-2" style="font-size:11px;color:#9a9898;gap:4px">
+        <div>الوقت: ${it.message_timestamp ? String(it.message_timestamp).slice(0,16).replace('T',' ') : '—'}</div>
+        <div>التصنيف: ${htmlEscape(it.classification || '—')}</div>
+        <div>المبلغ: ${it.amount == null ? '—' : money(it.amount)}</div>
+        <div>الثقة: ${conf}</div>
+        <div>من حساب: ${htmlEscape(it.source_account_name || '—')}</div>
+        <div>إلى حساب: ${htmlEscape(it.destination_account_name || '—')}</div>
+        <div>حقول ناقصة: ${htmlEscape(miss)}</div>
+        ${it.reviewed_by_name ? `<div>راجعها: ${htmlEscape(it.reviewed_by_name)}</div>` : ''}
+        ${it.rejection_reason ? `<div style="color:#E24B4A">سبب الرفض: ${htmlEscape(it.rejection_reason)}</div>` : ''}
+      </div>
+      ${canAct ? `<div class="flex-between mt-8" style="gap:6px">
+        <button class="btn-primary" style="flex:1" onclick="approveIntakeItem('${it.id}')">اعتماد</button>
+        <button class="btn-secondary" style="flex:1" onclick="editIntakeItem('${it.id}')">تعديل ثم اعتماد</button>
+        <button class="btn-secondary" style="flex:1;color:#E24B4A" onclick="rejectIntakeItem('${it.id}')">رفض</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+async function approveIntakeItem(id) {
+  if (!confirm('اعتماد هذه الحركة؟')) return;
+  try { await apiRequest('/intake/approve', { method:'POST', body: JSON.stringify({ id }) }); showMsg('✅ تم الاعتماد'); loadIntake(); }
+  catch(e) { showMsg('تعذر الاعتماد: ' + e.message); }
+}
+async function rejectIntakeItem(id) {
+  const reason = prompt('سبب الرفض (إلزامي):');
+  if (reason == null) return;
+  if (!reason.trim()) { showMsg('سبب الرفض مطلوب'); return; }
+  try { await apiRequest('/intake/reject', { method:'POST', body: JSON.stringify({ id, rejection_reason: reason.trim() }) }); showMsg('تم الرفض'); loadIntake(); }
+  catch(e) { showMsg('تعذر الرفض: ' + e.message); }
+}
+async function editIntakeItem(id) {
+  const it = intakeItems.find(x => x.id === id); if (!it) return;
+  const amountStr = prompt('المبلغ (اتركه فارغاً لعدم التغيير):', it.amount == null ? '' : String(it.amount));
+  if (amountStr === null) return;
+  const classification = prompt('التصنيف:', it.classification || '');
+  if (classification === null) return;
+  const patch = { id, classification: classification.trim() };
+  if (amountStr.trim() !== '') patch.amount = Number(amountStr.replace(/[^\d.]/g, ''));
+  patch.final_data = { ...(it.final_data || {}), amount: patch.amount != null ? patch.amount : it.amount, classification: patch.classification };
+  try {
+    await apiRequest('/intake/update', { method:'POST', body: JSON.stringify(patch) });
+    if (confirm('حُفظ التعديل. اعتماد الحركة الآن؟')) await apiRequest('/intake/approve', { method:'POST', body: JSON.stringify({ id }) });
+    showMsg('✅ تم'); loadIntake();
+  } catch(e) { showMsg('تعذر الحفظ: ' + e.message); }
+}
+
 function render() {
   const safe = (name, fn, fallbackId) => {
     try { fn(); }
@@ -5643,6 +5749,7 @@ function render() {
     }
   };
   safe('متابعة العملاء', renderClientOverview, 'pending-quotes-list');
+  safe('صندوق واتساب', renderIntake, 'intake-list');
   safe('حالة مزامنة دفترة', renderDaftraCapabilities, 'daftra-capabilities-view');
   safe('كانبان العملاء', () => {
     const kanban = document.getElementById('kanban');
