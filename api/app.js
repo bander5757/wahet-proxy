@@ -2145,7 +2145,8 @@ function ruleClassify(text) {
   if (isTransfer) classification = "internal_transfer";
   else if (has("عهدة", "عهده", "سلفة تشغيل", "سلفه تشغيل")) classification = "custody";
   else if (has("استرجاع", "استرداد", "مرتجع", "رد مبلغ", "ريفند")) classification = "refund";
-  else if (has("دفعة عميل", "تحصيل", "حصلت", "استلمت", "سدد العميل", "سدّد العميل", "إيراد", "ايراد", "وصلني")) classification = "receipt";
+  // "استلم" جذع يغطي استلمت/استلمنا/استلم. تجنّبنا "وصل" المجرّد لأنه يطابق "توصيل" (مصروف).
+  else if (has("دفعة عميل", "تحصيل", "حصلت", "حصلنا", "استلم", "سدد العميل", "سدّد العميل", "إيراد", "ايراد", "وصلني", "وصلنا")) classification = "receipt";
   else if (has("مصروف", "صرف", "دفعت", "اشتريت", "شراء", "فاتورة", "بنزين", "ديزل", "وقود", "صيانة", "زيت", "أجرة", "اجرة", "عمالة", "مواد")) classification = "expense";
   return { classification, amount: extractIntakeAmount(text), currency: "SAR", supplier_name: null, project_name: null };
 }
@@ -2186,19 +2187,25 @@ function getIntakeParser() {
   return ruleIntakeParser();
 }
 
-function intakeAccountTokens(name) {
-  return String(name || "").split(/\s+/).map((w) => w.trim()).filter((w) => w && w !== "حساب" && w.length >= 3);
+// توحيد صور الألف/الياء والتطويل حتى يطابق "أبو" ↔ "ابو".
+function normalizeArabic(s) {
+  return String(s || "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ـ/g, "");
 }
-// استخراج الحسابات من النص بالاتجاه (من ⇒ source، إلى/لحساب ⇒ destination). لا تخمين بلا ذكر صريح.
+function intakeAccountTokens(name) {
+  return normalizeArabic(String(name || "")).split(/\s+/).map((w) => w.trim()).filter((w) => w && w !== "حساب" && w.length >= 3);
+}
+// استخراج الحسابات من النص بالاتجاه:
+//   من ⇒ source · إلى/لحساب/في/على ⇒ destination (المال داخل إلى الحساب).
+// لا تخمين إطلاقاً: حساب غير مذكور صراحةً يبقى null ويُدرَج في missing_fields.
 function resolveAccountsFromText(text, accounts) {
-  const t = toLatinDigits(String(text || ""));
+  const t = normalizeArabic(toLatinDigits(String(text || "")));
   let source = null, dest = null;
   for (const a of accounts) {
     let idx = -1;
     for (const tok of intakeAccountTokens(a.name)) { const k = t.indexOf(tok); if (k >= 0) { idx = k; break; } }
     if (idx < 0) continue;
     const before = t.slice(Math.max(0, idx - 12), idx);
-    if (/الى|إلى|لحساب/.test(before)) { if (!dest) dest = a.id; }
+    if (/الي|لحساب|في|علي/.test(before)) { if (!dest) dest = a.id; }
     else if (/من/.test(before)) { if (!source) source = a.id; }
   }
   return { source_account_id: source, destination_account_id: dest };

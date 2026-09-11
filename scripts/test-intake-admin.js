@@ -51,7 +51,7 @@ async function main() {
     const r1 = await createWhatsappIntake(client, { provider: TP, provider_message_id: "A1", sender_phone: "0500000777", original_message: "دفعت 250 ريال بنزين من حساب فيصل", message_timestamp: "2026-09-12T10:00:00Z" });
     ok("محفوظ + حُلِّل تلقائياً (ليس new)", r1.stored === true && r1.parse?.attempted === true && r1.parse?.ok === true && r1.status !== "new", JSON.stringify({ s: r1.status, p: r1.parse }));
     const row1 = await getIntake(client, r1.id);
-    ok("status=needs_review (لا حسابات على staging)", row1.status === "needs_review", row1.status);
+    ok("status=parsed (الحساب المصدر تحقّق من النص)", row1.status === "parsed", row1.status);
     ok("parsed_data مكتوب", !!row1.parsed_data && row1.parsed_data.classification === "expense");
     ok("final_data ما زال null", row1.final_data == null);
 

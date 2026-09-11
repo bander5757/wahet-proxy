@@ -32,11 +32,19 @@ async function main() {
   console.log("baseline:", base.rows[0]);
 
   // حسابات مؤقتة
-  const mk = async (name, type) => (await client.query("insert into bank_accounts (name, account_type) values ($1,$2) returning id", [name, type])).rows[0].id;
+  // يستخدم حسابات staging الدائمة إن وُجدت، ولا ينشئ مكرّرات؛ يحذف فقط ما أنشأه هو.
+  const createdBanks = [];
+  const mk = async (name, type) => {
+    const ex = await client.query("select id from bank_accounts where name=$1 limit 1", [name]);
+    if (ex.rows[0]) return ex.rows[0].id;
+    const r = await client.query("insert into bank_accounts (name, account_type) values ($1,$2) returning id", [name, type]);
+    createdBanks.push(r.rows[0].id);
+    return r.rows[0].id;
+  };
   const accFaisal = await mk("حساب فيصل", "secondary");
-  const accAbu = await mk("حساب ابو فايز للعملاء", "secondary");
+  const accAbu = await mk("حساب أبو فايز للعملاء", "secondary");
   const accOrg = await mk("حساب المؤسسة الرسمي", "official");
-  const bankIds = [accFaisal, accAbu, accOrg];
+  const bankIds = createdBanks;
   // مستخدمون + جلسات
   const accU = (await client.query("insert into app_users (name,email,role) values ('م25 محاسب','t25-acc@wkaimah.local','accountant') returning id,name,role")).rows[0];
   const viewU = (await client.query("insert into app_users (name,email,role) values ('م25 مشاهد','t25-view@wkaimah.local','viewer') returning id,name,role")).rows[0];
