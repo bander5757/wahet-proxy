@@ -2248,7 +2248,7 @@ async function parseIntake(client, id, opts = {}) {
   if (!idS) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
   const row = (await client.query("select id, status, original_message, parsed_data from whatsapp_intake where id = $1", [idS])).rows[0];
   if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
-  if (row.status !== "new") { const e = new Error(`لا يمكن تحليل سجل بحالة ${row.status}`); e.statusCode = 409; throw e; }
+  if (!["new", "failed"].includes(row.status)) { const e = new Error(`لا يمكن تحليل سجل بحالة ${row.status}`); e.statusCode = 409; throw e; }
   const parser = opts.parser || getIntakeParser();
   const base = await parser.classify(row.original_message || "");
   const accounts = (await client.query("select id, name from bank_accounts where is_active = true")).rows;
@@ -2258,7 +2258,7 @@ async function parseIntake(client, id, opts = {}) {
     `update whatsapp_intake set
        classification = $1, amount = $2, currency = $3, source_account_id = $4, destination_account_id = $5,
        supplier_name = $6, project_name = $7, confidence_score = $8, missing_fields = $9,
-       parsed_data = coalesce(parsed_data, $10::jsonb), status = $11, updated_at = now()
+       parsed_data = coalesce(parsed_data, $10::jsonb), status = $11, error_message = null, updated_at = now()
      where id = $12`,
     [fin.classification, fin.amount, fin.currency, fin.source_account_id, fin.destination_account_id,
      fin.supplier_name, fin.project_name, fin.confidence, fin.missing_fields,
