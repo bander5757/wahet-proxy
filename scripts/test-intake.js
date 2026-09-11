@@ -84,7 +84,7 @@ async function main() {
       provider: TEST_PROVIDER, provider_message_id: "TESTM1-1", sender_phone: "0500000001",
       original_message: "مصروف 100 ريال بنزين", message_timestamp: "2026-09-10T10:00:00Z", amount: 100,
     });
-    ok("trusted new → stored, status=new", r4.status === "new" && r4.stored === true && r4.sender_phone === TRUSTED, JSON.stringify(r4));
+    ok("trusted new → stored + حُلِّل تلقائياً (M2.6)", r4.stored === true && r4.sender_phone === TRUSTED && r4.parse?.attempted === true && r4.status !== "new", JSON.stringify(r4));
     // 5) تكرار provider_message_id
     const r5 = await createWhatsappIntake(client, {
       provider: TEST_PROVIDER, provider_message_id: "TESTM1-1", sender_phone: "0500000001",
@@ -109,7 +109,7 @@ async function main() {
       provider: TEST_PROVIDER, provider_message_id: "TESTM1-H1", sender_phone: TRUSTED,
       original_message: "مصروف عبر الـhandler", message_timestamp: "2026-09-11T09:00:00Z",
     }), res8);
-    ok("handler happy → 201 + status=new", res8.code === 201 && res8.body && res8.body.data && res8.body.data.status === "new", `code=${res8.code} body=${JSON.stringify(res8.body)}`);
+    ok("handler happy → 201 + stored", res8.code === 201 && res8.body?.data?.stored === true, `code=${res8.code} body=${JSON.stringify(res8.body)}`);
 
     // تأكيد عدم إنشاء أي finance_entry أثناء الاختبار
     const fin = await client.query("select count(*)::int n from finance_entries");
@@ -118,7 +118,7 @@ async function main() {
     // ── تنظيف تام ──
     console.log("\n— تنظيف بيانات الاختبار —");
     const delWi = await client.query("delete from whatsapp_intake where provider = $1", [TEST_PROVIDER]);
-    const delAa = await client.query("delete from agent_actions where action in ('intake.receive','intake.reject_untrusted')");
+    const delAa = await client.query("delete from agent_actions where action like 'intake.%'");
     console.log(`  حُذف: whatsapp_intake=${delWi.rowCount}, agent_actions=${delAa.rowCount}`);
     // استرجاع allowlist
     if (hadAllowlist) {

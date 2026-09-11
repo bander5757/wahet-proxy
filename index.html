@@ -536,6 +536,16 @@
         </select>
       </div>
     </div>
+    <div id="intake-allowlist-box" class="section" style="margin-top:12px;display:none">
+      <div class="flex-between mb-8">
+        <div>
+          <div style="font-size:14px;font-weight:600">🔐 الأرقام الموثوقة</div>
+          <div style="font-size:11px;color:#9a9898;margin-top:2px">المطابقة بالرقم فقط (E.164). أي رقم خارج القائمة تُرفض رسائله.</div>
+        </div>
+        <button class="btn-secondary" onclick="addAllowlistMember()">+ إضافة رقم</button>
+      </div>
+      <div id="intake-allowlist-view"></div>
+    </div>
     <div id="intake-list" class="mt-8"></div>
   </div>
 </div>
@@ -5672,6 +5682,7 @@ async function loadIntake() {
     const res = await apiRequest('/intake' + (status ? ('?status=' + encodeURIComponent(status)) : ''));
     intakeItems = Array.isArray(res.data) ? res.data : [];
     renderIntake();
+    loadAllowlist();
   } catch(e) { showMsg('تعذر تحميل صندوق واتساب: ' + e.message); }
 }
 function renderIntake() {
@@ -5710,6 +5721,49 @@ function renderIntake() {
     </div>`;
   }).join('');
 }
+/* إدارة الأرقام الموثوقة — owner فقط */
+let intakeAllowlist = [];
+function canAdminAllowlist() { return !!currentUser && currentUser.role === 'owner'; }
+async function loadAllowlist() {
+  const box = document.getElementById('intake-allowlist-box');
+  if (!box) return;
+  if (!canAdminAllowlist() || !apiOnline) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  try {
+    const res = await apiRequest('/intake/allowlist');
+    intakeAllowlist = Array.isArray(res.data) ? res.data : [];
+    renderAllowlist();
+  } catch(e) { showMsg('تعذر تحميل الأرقام الموثوقة: ' + e.message); }
+}
+function renderAllowlist() {
+  const el = document.getElementById('intake-allowlist-view');
+  if (!el) return;
+  if (!intakeAllowlist.length) { el.innerHTML = '<div class="text-secondary" style="font-size:12px">لا توجد أرقام موثوقة بعد — أضف أرقام الفريق ليُقبل واردهم.</div>'; return; }
+  el.innerHTML = intakeAllowlist.map(m => `<div class="flex-between" style="padding:6px 0;border-bottom:0.5px solid #2e3244">
+    <div>
+      <span style="font-size:13px;font-weight:600">${htmlEscape(m.name || '—')}</span>
+      <span style="font-size:11px;color:#9a9898"> · ${htmlEscape(m.phone)}</span>
+      ${m.active ? '' : '<span class="badge" style="font-size:10px;margin-right:6px">معطّل</span>'}
+    </div>
+    <button class="btn-secondary" style="font-size:11px;padding:3px 10px" onclick="toggleAllowlistMember('${m.phone}', ${m.active ? 'false' : 'true'})">${m.active ? 'تعطيل' : 'تفعيل'}</button>
+  </div>`).join('');
+}
+async function addAllowlistMember() {
+  const phone = prompt('رقم الجوال (مثال 05xxxxxxxx أو +9665xxxxxxxx):');
+  if (phone === null || !phone.trim()) return;
+  const name = prompt('الاسم (اختياري، بيان مساعد فقط):') || '';
+  try {
+    await apiRequest('/intake/allowlist', { method:'POST', body: JSON.stringify({ phone: phone.trim(), name: name.trim(), active: true }) });
+    showMsg('✅ أُضيف الرقم'); loadAllowlist();
+  } catch(e) { showMsg('تعذر الإضافة: ' + e.message); }
+}
+async function toggleAllowlistMember(phone, active) {
+  try {
+    await apiRequest('/intake/allowlist', { method:'POST', body: JSON.stringify({ phone, active }) });
+    showMsg(active ? '✅ فُعّل' : 'تم التعطيل'); loadAllowlist();
+  } catch(e) { showMsg('تعذر التحديث: ' + e.message); }
+}
+
 async function approveIntakeItem(id) {
   if (!confirm('اعتماد هذه الحركة؟')) return;
   try { await apiRequest('/intake/approve', { method:'POST', body: JSON.stringify({ id }) }); showMsg('✅ تم الاعتماد'); loadIntake(); }

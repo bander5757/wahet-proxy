@@ -1818,20 +1818,65 @@ async function logAgentAction(client, a) {
   await client.query(
     `insert into agent_actions
        (actor_type, actor_ref, actor_name, agent_role, action, target_type, target_id,
-        summary, before_state, after_state, confidence, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12)`,
+        summary, before_state, after_state, confidence, status, error_message)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13)`,
     [
       a.actorType || "system", a.actorRef || null, a.actorName || null, a.agentRole || null,
       a.action, a.targetType || null, a.targetId || null, a.summary || null,
       a.beforeState != null ? JSON.stringify(a.beforeState) : null,
       a.afterState != null ? JSON.stringify(a.afterState) : null,
       a.confidence == null ? null : a.confidence, a.status || "done",
+      a.errorMessage ? String(a.errorMessage).slice(0, 500) : null,
     ]
   );
 }
 
+/* ─── إدارة قائمة الموثوقين (M2.6) — owner فقط، بلا migration (app_settings) ─── */
+function requireIntakeAdmin(user) {
+  if (!user || user.role !== "owner") {
+    const e = new Error("إدارة قائمة الموثوقين لمالك النظام فقط");
+    e.statusCode = 403; throw e;
+  }
+}
+
+async function listIntakeAllowlist(client) {
+  const members = await getIntakeAllowlist(client);
+  return members.map((m) => ({
+    phone: normalizePhoneE164(m && m.phone) || String((m && m.phone) || ""),
+    name: (m && m.name) || "", active: !(m && m.active === false),
+    role: (m && m.role) || "", notes: (m && m.notes) || "",
+  }));
+}
+
+// إضافة/تعديل/تعطيل عضو. الهوية = الرقم المطبَّع E.164 (الاسم بيان مساعد فقط).
+async function upsertIntakeAllowlistMember(client, payload, user) {
+  requireIntakeAdmin(user);
+  const phone = normalizePhoneE164(payload.phone);
+  if (!phone) { const e = new Error("رقم غير صالح (تعذّر تطبيعه إلى E.164)"); e.statusCode = 400; throw e; }
+  const setting = (await getSetting(client, "intake_allowlist")) || {};
+  const members = Array.isArray(setting.members) ? setting.members.slice() : [];
+  const idx = members.findIndex((m) => normalizePhoneE164(m && m.phone) === phone);
+  const before = idx >= 0 ? members[idx] : null;
+  const next = {
+    phone,
+    name: payload.name !== undefined ? String(payload.name || "").trim() : (before?.name || ""),
+    active: payload.active !== undefined ? payload.active !== false : (before ? before.active !== false : true),
+    role: payload.role !== undefined ? String(payload.role || "").trim() : (before?.role || ""),
+    notes: payload.notes !== undefined ? String(payload.notes || "").trim() : (before?.notes || ""),
+  };
+  if (idx >= 0) members[idx] = next; else members.push(next);
+  await setSetting(client, "intake_allowlist", { members, updated_at: new Date().toISOString() });
+  await logAgentAction(client, {
+    actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "accounting",
+    action: before ? "intake.allowlist.update" : "intake.allowlist.add",
+    targetType: "intake_allowlist", targetId: phone, beforeState: before, afterState: next,
+    summary: `${before ? "تعديل" : "إضافة"} رقم موثوق ${phone}${next.active ? "" : " (معطّل)"}`,
+  });
+  return listIntakeAllowlist(client);
+}
+
 // المنطق الأساسي لاستقبال رسالة WhatsApp. M1 فقط: لا parsing محاسبي، لا finance_entry.
-async function createWhatsappIntake(client, payload) {
+async function createWhatsappIntake(client, payload, opts = {}) {
   const provider = String(payload.provider || "peach").trim() || "peach";
   const providerMessageId = payload.provider_message_id != null ? String(payload.provider_message_id).trim()
     : (payload.message_id != null ? String(payload.message_id).trim() : "");
@@ -1895,7 +1940,35 @@ async function createWhatsappIntake(client, payload) {
       actorType: "system", action: "intake.receive", targetType: "whatsapp_intake", targetId: id,
       summary: `استلام رسالة من ${e164}${member.name ? " (" + member.name + ")" : ""}`,
     });
-    return { status: "new", stored: true, id, sender_phone: e164 };
+
+    // M2.6: تحليل تلقائي بعد نجاح الحفظ. الرسالة محفوظة بالفعل ⇒ فشل التحليل لا يفقدها أبداً.
+    let finalStatus = "new";
+    const parse = { attempted: false, ok: false };
+    if (opts.autoParse !== false) {
+      parse.attempted = true;
+      try {
+        const parsed = await parseIntake(client, id, { parser: opts.parser });
+        parse.ok = true; finalStatus = parsed.status;
+      } catch (perr) {
+        // لا نُلغي الحفظ؛ نعلّم السجل failed برسالة واضحة ويبقى قابلاً لإعادة المحاولة والمراجعة
+        parse.error = String(perr.message || "parse failed");
+        try {
+          await client.query(
+            "update whatsapp_intake set status='failed', error_message=$1, updated_at=now() where id=$2 and status='new'",
+            [parse.error.slice(0, 500), id]
+          );
+          finalStatus = "failed";
+        } catch (_) { /* الحفظ الأصلي يبقى سليماً */ }
+        try {
+          await logAgentAction(client, {
+            actorType: "agent", agentRole: "accounting", action: "intake.parse",
+            targetType: "whatsapp_intake", targetId: id, status: "failed",
+            errorMessage: parse.error, summary: `فشل التحليل التلقائي: ${parse.error}`,
+          });
+        } catch (_) {}
+      }
+    }
+    return { status: finalStatus, stored: true, id, sender_phone: e164, parse };
   } catch (err) {
     if (err.code === "23505") return { status: "duplicate", reason: "unique_violation", stored: false };
     throw err;
@@ -1970,7 +2043,7 @@ const INTAKE_EDITABLE = [
   "source_account_id", "destination_account_id", "customer_id", "vehicle_id",
   "quote_id", "supplier_name", "project_name",
 ];
-const INTAKE_REVIEWABLE_STATES = ["new", "parsed", "needs_review"];
+const INTAKE_REVIEWABLE_STATES = ["new", "parsed", "needs_review", "failed"];
 
 async function updateIntake(client, payload, user) {
   requireIntakeApprover(user);
@@ -2293,7 +2366,15 @@ module.exports = async function handler(req, res) {
       requireIntakeApprover(user); // M2.5: القراءة أيضاً محصورة بـ owner/accountant
       return res.status(200).json({ ok: true, data: await listIntake(client, { status: query.status }) });
     }
-    if (req.method === "GET" && path.startsWith("/intake/") && path !== "/intake/whatsapp") {
+    // إدارة قائمة الموثوقين (owner فقط) — يجب أن تسبق مطابقة /intake/:id العامة
+    if (req.method === "GET" && path === "/intake/allowlist") {
+      requireIntakeAdmin(user);
+      return res.status(200).json({ ok: true, data: await listIntakeAllowlist(client) });
+    }
+    if (req.method === "POST" && path === "/intake/allowlist") {
+      return res.status(200).json({ ok: true, data: await upsertIntakeAllowlistMember(client, req.body || {}, user) });
+    }
+    if (req.method === "GET" && path.startsWith("/intake/") && path !== "/intake/whatsapp" && path !== "/intake/allowlist") {
       requireIntakeApprover(user);
       const id = decodeURIComponent(path.slice("/intake/".length));
       return res.status(200).json({ ok: true, data: await getIntake(client, id) });
@@ -2686,4 +2767,8 @@ module.exports.__m2 = {
 module.exports.__m25 = {
   parseIntake, ruleClassify, finalizeIntakeParse, resolveAccountsFromText,
   ruleIntakeParser, getIntakeParser, extractIntakeAmount,
+};
+// دوال M2.6 (إدارة الموثوقين) لأغراض الاختبار فقط
+module.exports.__m26 = {
+  listIntakeAllowlist, upsertIntakeAllowlistMember, requireIntakeAdmin,
 };
