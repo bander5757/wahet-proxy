@@ -19,6 +19,12 @@ async function main() {
   const snap = async () => (await client.query("select (select count(*)::int from whatsapp_intake) wi,(select count(*)::int from agent_actions) aa,(select count(*)::int from app_users) au,(select count(*)::int from finance_entries) fin,(select count(*)::int from app_settings where key='intake_allowlist') al")).rows[0];
   const base = await snap();
   console.log("baseline:", JSON.stringify(base));
+  // نسخة احتياطية: هذه القائمة بيانات staging دائمة — يُمنع حذفها
+  const prevAl = await client.query("select value from app_settings where key='intake_allowlist'");
+  const hadAl = prevAl.rows.length > 0;
+  // عزل: نبدأ من قائمة فارغة محكومة حتى لا تتأثر التوقّعات بقائمة staging الدائمة
+  await client.query(`insert into app_settings (key,value) values ('intake_allowlist','{"members":[]}'::jsonb)
+    on conflict (key) do update set value=excluded.value`);
 
   const owner = (await client.query("insert into app_users (name,email,role) values ('م26 مالك','t26-own@wkaimah.local','owner') returning id,name,role")).rows[0];
   const acct = (await client.query("insert into app_users (name,email,role) values ('م26 محاسب','t26-acc@wkaimah.local','accountant') returning id,name,role")).rows[0];
@@ -35,7 +41,7 @@ async function main() {
     let list = await upsertIntakeAllowlistMember(client, { phone: "0500000777", name: "عمر" }, owner);
     ok("إضافة عضو + تطبيع E.164", list.some((m) => m.phone === "+966500000777" && m.name === "عمر" && m.active === true), JSON.stringify(list));
     list = await upsertIntakeAllowlistMember(client, { phone: "+966500000777", name: "عمر المشرف" }, owner);
-    ok("تعديل لا يكرّر (مطابقة بالرقم)", list.filter((m) => m.phone === "+966500000777").length === 1 && list[0].name === "عمر المشرف");
+    ok("تعديل لا يكرّر (مطابقة بالرقم)", list.filter((m) => m.phone === "+966500000777").length === 1 && list.find((m) => m.phone === "+966500000777").name === "عمر المشرف");
     list = await upsertIntakeAllowlistMember(client, { phone: "966500000777", active: false }, owner);
     ok("تعطيل عضو", list.find((m) => m.phone === "+966500000777").active === false);
     ok("GET list يعمل", (await listIntakeAllowlist(client)).length === 1);
@@ -81,8 +87,9 @@ async function main() {
     const d1 = await client.query("delete from whatsapp_intake where provider=$1", [TP]);
     const d2 = await client.query("delete from agent_actions where action like 'intake.%' or actor_ref = any($1)", [userIds]);
     const d3 = await client.query("delete from app_users where id = any($1)", [userIds]);
-    const d4 = await client.query("delete from app_settings where key='intake_allowlist'");
-    console.log(`  حُذف: intake=${d1.rowCount} actions=${d2.rowCount} users=${d3.rowCount} allowlist=${d4.rowCount}`);
+    if (hadAl) await client.query("update app_settings set value=$1::jsonb where key='intake_allowlist'", [JSON.stringify(prevAl.rows[0].value)]);
+    else await client.query("delete from app_settings where key='intake_allowlist'");
+    console.log(`  حُذف: intake=${d1.rowCount} actions=${d2.rowCount} users=${d3.rowCount} allowlist=${hadAl ? "مُسترجَعة" : "محذوفة"}`);
     const after = await snap();
     console.log("  بعد التنظيف:", JSON.stringify(after));
     const clean = JSON.stringify(after) === JSON.stringify(base);
