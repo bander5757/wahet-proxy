@@ -2404,7 +2404,8 @@ async function dashboard(client, user) {
 }
 
 
-// [مؤقت P1.6] استخراج نص PDF بلا اعتماديات: فكّ ضغط streams ثم قراءة عوامل النص.
+// استخراج نص PDF بلا اعتماديات (FlateDecode + عوامل Tj/TJ).
+// مُتحقَّق على إيصال تحويل حقيقي: الحقول اللاتينية/الرقمية تُقرأ، والعربية مشوّهة (CMap مخصّص).
 function pdfExtractText(buf) {
   const zlib = require("zlib");
   const s = buf.toString("latin1");
@@ -2495,44 +2496,6 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/intake/reject") {
       return res.status(200).json({ ok: true, data: await rejectIntake(client, req.body || {}, user) });
     }
-    // [مؤقت P1.6] تشخيص وصول الخادم إلى مرفقات Peach — يُحذف بعد الحسم.
-    // ليس fetch عاماً: مضيف واحد بالضبط + بادئة مسار إلزامية + مفتاح خدمة،
-    // ولا يُعيد جسم الملف إطلاقاً (ميتاداتا فقط) فلا يصلح كوسيط تسريب.
-    if (req.method === "POST" && path === "/_diag/peach-media") {
-      const secret = process.env.INTAKE_SECRET;
-      if (!secret) return res.status(503).json({ ok: false, error: "غير مُعد" });
-      if (String(req.headers["x-intake-secret"] || "") !== secret) {
-        return res.status(401).json({ ok: false, error: "مفتاح غير صحيح" });
-      }
-      let u;
-      try { u = new URL(String((req.body || {}).url || "")); }
-      catch { return res.status(400).json({ ok: false, error: "رابط غير صالح" }); }
-      if (!["http:", "https:"].includes(u.protocol) || u.hostname !== "app.trypeach.ai" ||
-          !u.pathname.startsWith("/rails/active_storage/blobs/redirect/")) {
-        return res.status(403).json({ ok: false, error: "مضيف/مسار غير مسموح" });
-      }
-      const started = Date.now();
-      try {
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), 20000);
-        const r = await fetch(u.toString(), { redirect: "follow", signal: ac.signal });
-        const buf = Buffer.from(await r.arrayBuffer());
-        clearTimeout(timer);
-        let text = null, textLen = 0;
-        if ((r.headers.get("content-type") || "").includes("pdf")) {
-          try { const t = pdfExtractText(buf); textLen = t.length; text = t.slice(0, 1800); } catch (e) { text = "EXTRACT_ERR: " + e.message; }
-        }
-        return res.status(200).json({ ok: true, reachable: true, httpStatus: r.status,
-          contentType: r.headers.get("content-type") || null, bytes: buf.length,
-          textLen, text,
-          sha256: crypto.createHash("sha256").update(buf).digest("hex"),
-          finalHost: (() => { try { return new URL(r.url).hostname; } catch { return null; } })(),
-          head: buf.slice(0, 5).toString("latin1"), ms: Date.now() - started });
-      } catch (e) {
-        return res.status(200).json({ ok: true, reachable: false, error: e.name + ": " + e.message, ms: Date.now() - started });
-      }
-    }
-
     // M2.5: تحليل AI لسجل وارد (يشغّله الوكيل بمفتاح الخدمة أو مخوّل بشري)
     if (req.method === "POST" && path === "/intake/parse") {
       const secret = process.env.INTAKE_SECRET;
