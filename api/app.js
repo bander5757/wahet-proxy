@@ -2403,6 +2403,29 @@ async function dashboard(client, user) {
   };
 }
 
+
+// [مؤقت P1.6] استخراج نص PDF بلا اعتماديات: فكّ ضغط streams ثم قراءة عوامل النص.
+function pdfExtractText(buf) {
+  const zlib = require("zlib");
+  const s = buf.toString("latin1");
+  const out = [];
+  const re = /stream\r?\n([\s\S]*?)endstream/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const data = Buffer.from(m[1], "latin1");
+    let txt = null;
+    try { txt = zlib.inflateSync(data).toString("latin1"); }
+    catch (_) { try { txt = zlib.inflateRawSync(data).toString("latin1"); } catch (_) { txt = null; } }
+    if (!txt || !/(Tj|TJ)/.test(txt)) continue;
+    const parts = [];
+    const tj = /\((?:\\.|[^\\()])*\)/g;
+    let t;
+    while ((t = tj.exec(txt))) parts.push(t[0].slice(1, -1).replace(/\\([()\\])/g, "$1"));
+    if (parts.length) out.push(parts.join(""));
+  }
+  return out.join("\n");
+}
+
 module.exports = async function handler(req, res) {
   sendCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -2495,8 +2518,13 @@ module.exports = async function handler(req, res) {
         const r = await fetch(u.toString(), { redirect: "follow", signal: ac.signal });
         const buf = Buffer.from(await r.arrayBuffer());
         clearTimeout(timer);
+        let text = null, textLen = 0;
+        if ((r.headers.get("content-type") || "").includes("pdf")) {
+          try { const t = pdfExtractText(buf); textLen = t.length; text = t.slice(0, 1800); } catch (e) { text = "EXTRACT_ERR: " + e.message; }
+        }
         return res.status(200).json({ ok: true, reachable: true, httpStatus: r.status,
           contentType: r.headers.get("content-type") || null, bytes: buf.length,
+          textLen, text,
           sha256: crypto.createHash("sha256").update(buf).digest("hex"),
           finalHost: (() => { try { return new URL(r.url).hostname; } catch { return null; } })(),
           head: buf.slice(0, 5).toString("latin1"), ms: Date.now() - started });
