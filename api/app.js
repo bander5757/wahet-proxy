@@ -1886,14 +1886,18 @@ async function createWhatsappIntake(client, payload, opts = {}) {
   const source = String(payload.source || "whatsapp").trim() || "whatsapp";
   const messageTimestamp = payload.message_timestamp || null;
   const attachmentUrl = payload.attachment_url ? String(payload.attachment_url) : null;
+  const attachmentName = payload.attachment_name ? String(payload.attachment_name).slice(0, 240) : null;
+  const attachmentMime = payload.attachment_mime ? String(payload.attachment_mime).slice(0, 120) : null;
+  const attachmentMeta = payload.attachment_meta != null ? payload.attachment_meta : null;
   const amount = payload.amount != null && payload.amount !== "" ? Number(payload.amount) : null;
 
   // الحقول المطلوبة
   if (!payload.sender_phone || !String(payload.sender_phone).trim()) {
     const e = new Error("sender_phone مطلوب"); e.statusCode = 400; throw e;
   }
-  if (!originalMessage || !originalMessage.trim()) {
-    const e = new Error("original_message مطلوب"); e.statusCode = 400; throw e;
+  // رسالة بمرفق فقط (PDF/صورة بلا caption) مقبولة: النص إلزامي فقط عند غياب مرفق صالح.
+  if ((!originalMessage || !originalMessage.trim()) && !attachmentUrl) {
+    const e = new Error("original_message مطلوب (أو مرفق صالح)"); e.statusCode = 400; throw e;
   }
 
   // تطبيع E.164 قبل allowlist/dedup/التخزين
@@ -1919,21 +1923,48 @@ async function createWhatsappIntake(client, payload, opts = {}) {
     );
     if (dup.rows[0]) return { status: "duplicate", reason: "provider_message_id", stored: false, existingId: dup.rows[0].id };
   }
-  // ثم dedup_hash (بصمة احتياطية)
+  // (2) دليل قوي: نفس المرفق لدى المزوّد ⇒ نفس المستند حرفياً
+  if (attachmentUrl) {
+    const dupA = await client.query("select id from whatsapp_intake where attachment_url = $1 limit 1", [attachmentUrl]);
+    if (dupA.rows[0]) return { status: "duplicate", reason: "attachment", stored: false, existingId: dupA.rows[0].id };
+  }
+  // (2ب) بصمة متطابقة تماماً (نفس المرسل والوقت والنص والمبلغ والمرفق)
   const dedupHash = computeIntakeDedupHash({ e164, messageTimestamp, amount, originalMessage, attachmentUrl });
   const dupH = await client.query("select id from whatsapp_intake where dedup_hash = $1 limit 1", [dedupHash]);
   if (dupH.rows[0]) return { status: "duplicate", reason: "dedup_hash", stored: false, existingId: dupH.rows[0].id };
+
+  // (3) اشتباه فقط: نفس المرسل ونفس النص خلال 24 ساعة بلا دليل قاطع.
+  //     لا يُرفض ولا يُحذف — يُخزَّن ويُعلَّم ليقرّر الإنسان (معاملتان متشابهتان قد تكونان صحيحتين).
+  let duplicateOf = null, duplicateReason = null;
+  if (originalMessage && originalMessage.trim()) {
+    const sim = await client.query(
+      `select id, created_at from whatsapp_intake
+       where sender_phone = $1 and original_message = $2
+         and created_at > now() - interval '24 hours'
+       order by created_at desc limit 1`,
+      [e164, originalMessage]
+    );
+    if (sim.rows[0]) {
+      duplicateOf = sim.rows[0].id;
+      duplicateReason = "مشابه لمعاملة سابقة خلال 24 ساعة: نفس المرسل ونفس النص، بلا دليل قاطع (مرفق/معرّف رسالة مختلف) — يحتاج قرار بشري";
+    }
+  }
 
   // إدراج — status='new' (لا تحليل محاسبي في M1)
   try {
     const ins = await client.query(
       `insert into whatsapp_intake
          (provider, provider_message_id, sender_phone, sender_name, original_message,
-          message_timestamp, source, raw_payload, dedup_hash, status)
-       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'new')
+          message_timestamp, source, raw_payload, dedup_hash, status,
+          attachment_url, attachment_name, attachment_mime, attachment_meta,
+          duplicate_of, duplicate_reason)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'new',$10,$11,$12,$13::jsonb,$14,$15)
        returning id`,
       [provider, providerMessageId || null, e164, senderName, originalMessage,
-       messageTimestamp, source, JSON.stringify(payload || {}), dedupHash]
+       messageTimestamp, source, JSON.stringify(payload || {}), dedupHash,
+       attachmentUrl, attachmentName, attachmentMime,
+       attachmentMeta != null ? JSON.stringify(attachmentMeta) : null,
+       duplicateOf, duplicateReason]
     );
     const id = ins.rows[0].id;
     await logAgentAction(client, {
@@ -1968,7 +1999,16 @@ async function createWhatsappIntake(client, payload, opts = {}) {
         } catch (_) {}
       }
     }
-    return { status: finalStatus, stored: true, id, sender_phone: e164, parse };
+    if (duplicateOf && finalStatus !== "failed") {
+      await client.query("update whatsapp_intake set status='needs_review', updated_at=now() where id=$1", [id]);
+      finalStatus = "needs_review";
+      await logAgentAction(client, {
+        actorType: "system", action: "intake.duplicate_suspected", targetType: "whatsapp_intake", targetId: id,
+        summary: duplicateReason, afterState: { duplicate_of: duplicateOf },
+      });
+    }
+    return { status: finalStatus, stored: true, id, sender_phone: e164, parse,
+             possible_duplicate_of: duplicateOf || undefined };
   } catch (err) {
     if (err.code === "23505") return { status: "duplicate", reason: "unique_violation", stored: false };
     throw err;
@@ -1999,6 +2039,8 @@ function intakeRow(row) {
     project_name: row.project_name || "",
     status: row.status,
     rejection_reason: row.rejection_reason || "",
+    duplicate_of: row.duplicate_of || null,
+    duplicate_reason: row.duplicate_reason || "",
     parsed_data: row.parsed_data || null,
     final_data: row.final_data || null,
     reviewed_by: row.reviewed_by || null,
@@ -2123,16 +2165,43 @@ function toLatinDigits(s) {
                         .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
 }
 
+// المبلغ لا يُستخرج إلا بسياق مالي صريح (عملة أو كلمة مالية).
+// الأرقام المجرّدة تُتجاهل عمداً: جوّالات، IBAN، أرقام مراجع/هوية/عقود.
+const MONEY_NUM = "\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:\\.\\d{1,2})?";
+const MONEY_CUE_WORD = "مبلغ|بمبلغ|قيمة|بقيمة|الاجمالي|الإجمالي|اجمالي|إجمالي|دفعت|دفعنا|حولت|حوّلت|تحويل|حوالة|دفعة|سددت|سدّدت|سدد|استلمنا|استلمت|تحصيل|عهدة|عهده|صرفت|صرفنا";
+
+function plausibleAmount(raw, t, idx) {
+  const clean = String(raw).replace(/,/g, "");
+  const n = Number(clean);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const intDigits = clean.split(".")[0].length;
+  if (intDigits > 7) return null;                          // أطول من 9,999,999 ⇒ غالباً مرجع/جوال
+  if (/^0\d/.test(clean)) return null;                     // يبدأ بصفر ⇒ جوّال/رقم مرجعي لا مبلغ
+  // رفض إن كان جزءاً من سلسلة أطول (IBAN/مرجع ملتصق بحروف أو أرقام)
+  const before = t[idx - 1] || "", after = t[idx + String(raw).length] || "";
+  if (/[0-9A-Za-z٠-٩]/.test(before) || /[0-9A-Za-z]/.test(after)) return null;
+  return n;
+}
+
 function extractIntakeAmount(text) {
   const t = toLatinDigits(text);
-  const withCur = [...t.matchAll(/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:ر\.?\s?س|ريال|sar)/gi)]
-    .map((m) => Number(m[1].replace(",", "."))).filter((n) => n > 0);
-  if (withCur.length) return withCur[0];
-  const withWord = [...t.matchAll(/(?:مبلغ|بمبلغ|دفعت|حولت|حوّلت|سدد|سدّد|تحصيل|عهدة|عهده|صرف|مصروف)\s*([0-9]+(?:[.,][0-9]{1,2})?)/gi)]
-    .map((m) => Number(m[1].replace(",", "."))).filter((n) => n > 0);
-  if (withWord.length) return withWord[0];
-  const any = [...t.matchAll(/[0-9]+(?:[.,][0-9]{1,2})?/g)].map((m) => Number(m[0].replace(",", "."))).filter((n) => n > 0);
-  return any.length ? any[0] : null;
+  const tryAll = (re) => {
+    for (const m of t.matchAll(re)) {
+      const g = m[1] != null ? m[1] : m[2];
+      if (g == null) continue;
+      const idx = t.indexOf(g, m.index);
+      const v = plausibleAmount(g, t, idx);
+      if (v != null) return v;
+    }
+    return null;
+  };
+  // (1) رقم + عملة  |  (2) عملة + رقم
+  const cur = tryAll(new RegExp(`(${MONEY_NUM})\\s*(?:ر\\.?\\s?س|ريال|sar)|(?:ر\\.?\\s?س|ريال|sar)\\s*(${MONEY_NUM})`, "gi"));
+  if (cur != null) return cur;
+  // (3) كلمة مالية ثم رقم قريب (حتى 12 محرفاً غير رقمية بينهما)
+  const cue = tryAll(new RegExp(`(?:${MONEY_CUE_WORD})[^\\d\\n]{0,12}(${MONEY_NUM})`, "gi"));
+  if (cue != null) return cue;
+  return null;                                             // لا سياق مالي ⇒ لا تخمين
 }
 
 // تصنيف بقواعد حتمية (fallback مستقل عن أي مزوّد AI)
@@ -2148,6 +2217,12 @@ function ruleClassify(text) {
   // "استلم" جذع يغطي استلمت/استلمنا/استلم. تجنّبنا "وصل" المجرّد لأنه يطابق "توصيل" (مصروف).
   else if (has("دفعة عميل", "تحصيل", "حصلت", "حصلنا", "استلم", "سدد العميل", "سدّد العميل", "إيراد", "ايراد", "وصلني", "وصلنا")) classification = "receipt";
   else if (has("مصروف", "صرف", "دفعت", "اشتريت", "شراء", "فاتورة", "بنزين", "ديزل", "وقود", "صيانة", "زيت", "أجرة", "اجرة", "عمالة", "مواد")) classification = "expense";
+  // تحديث تشغيلي: يعتمد على المحتوى لا على المرسِل. يُفحص فقط بعد استبعاد الأنواع المالية.
+  else if (has("وصلنا الموقع", "وصلنا للموقع", "انتهى التركيب", "بدأنا التركيب", "جاري التركيب",
+               "تم التركيب", "تم الفك", "نحتاج عمال", "نحتاج عمالة", "الفريق في", "تأخرنا",
+               "تم التسليم", "جاهز للتسليم", "تقرير", "متابعة", "تواصل", "فرصة", "منافسة", "مهرجان", "معرض")) {
+    classification = "operational_update";
+  }
   return { classification, amount: extractIntakeAmount(text), currency: "SAR", supplier_name: null, project_name: null };
 }
 
@@ -2218,7 +2293,9 @@ function finalizeIntakeParse(base, accIds, parserName) {
   const source = accIds.source_account_id || null;
   const dest = accIds.destination_account_id || null;
   const missing = [];
-  if (amount == null) missing.push("amount");
+  // المبلغ مطلوب للأنواع المالية فقط؛ التحديث التشغيلي بطبيعته بلا مبلغ.
+  const FINANCIAL = ["expense", "receipt", "internal_transfer", "custody", "refund"];
+  if (amount == null && FINANCIAL.includes(classification)) missing.push("amount");
   if (classification === "expense" && !source) missing.push("source_account_id");
   if (classification === "receipt" && !dest) missing.push("destination_account_id");
   if (classification === "internal_transfer") {

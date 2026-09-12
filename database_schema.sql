@@ -294,6 +294,11 @@ create table if not exists whatsapp_intake (
 );
 
 -- منع التكرار حسب (المزوّد + معرّف رسالته)؛ نفس message_id قد يتكرر بين مزوّدين مختلفين.
+-- P1.5: الاشتباه بالتكرار (ليس رفضاً) — السجل يُخزَّن ويُعلَّم للمراجع البشري.
+alter table whatsapp_intake add column if not exists duplicate_of uuid references whatsapp_intake(id);
+alter table whatsapp_intake add column if not exists duplicate_reason text;
+create index if not exists idx_intake_duplicate_of on whatsapp_intake(duplicate_of) where duplicate_of is not null;
+
 create unique index if not exists idx_intake_provider_msg
   on whatsapp_intake(provider, provider_message_id) where provider_message_id is not null;
 -- بصمة احتياطية مستقلة عند غياب المعرّف.
