@@ -14,10 +14,13 @@ const ok = (n, c, e) => { if (c) { passed++; console.log(`  ✅ ${n}`); } else {
 // نص إيصال حقيقي (كما استُخرج فعلاً من Transaction-Receipt.pdf عبر Vercel)
 const REAL_TEXT = `Transfer ReceiptDate 2026/09/12 - 06:03 PMLocal Transfers Transaction Details 1,000.58Total Amount 21000010006080145472From SA6220EC0208992000020938To 9112092600655951Payment Reference NumberAlrajhibank.com.sa800 122 8888`;
 
+// مرجع فريد لكل تشغيل للحالات التي تكتب في القاعدة — حتى لا تصطدم بسجل بندر الحقيقي المُبقى في staging
+const TEST_REF = "7" + String(Date.now()).slice(-12) + "01";
+const DB_TEXT = REAL_TEXT.replace("9112092600655951", TEST_REF);
 // مرفق وهمي محكوم: لا شبكة، نحقن نتيجة المعالجة لاختبار المنطق حتمياً
 const fakeProc = (sha, fields, text) => async () => ({ status: "extracted", sha256: sha, bytes: 1234,
-  contentType: "application/pdf", text_len: (text || REAL_TEXT).length, text: text || REAL_TEXT,
-  fields: fields || extractReceiptFields(text || REAL_TEXT) });
+  contentType: "application/pdf", text_len: (text || DB_TEXT).length, text: text || DB_TEXT,
+  fields: fields || extractReceiptFields(text || DB_TEXT) });
 
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false } });
@@ -50,10 +53,10 @@ async function main() {
     ok("مرفق فقط مقبول", r1.stored === true, JSON.stringify(r1));
     const row1 = await getIntake(client, r1.id);
     ok("attachment_sha256 مخزّن", row1.attachment_sha256 === "HASH_AAA");
-    ok("transaction_reference مخزّن", row1.transaction_reference === "9112092600655951");
+    ok("transaction_reference مخزّن", row1.transaction_reference === TEST_REF, String(row1.transaction_reference));
     ok("المبلغ من المستند 1000.58", Number(row1.amount) === 1000.58, String(row1.amount));
     const meta = (await client.query("select attachment_meta from whatsapp_intake where id=$1", [r1.id])).rows[0].attachment_meta;
-    ok("تفاصيل الاستخراج في attachment_meta", meta?.extraction?.status === "extracted" && meta.extraction.fields.reference === "9112092600655951");
+    ok("تفاصيل الاستخراج في attachment_meta", meta?.extraction?.status === "extracted" && meta.extraction.fields.reference === TEST_REF);
     ok("parsed_data لا يحوي النص الخام", !JSON.stringify(row1.parsed_data).includes("Alrajhibank"));
 
     console.log("\n— (E) ترتيب dedup —");
@@ -63,7 +66,7 @@ async function main() {
       attachment_mime: "application/pdf", message_timestamp: "2026-09-12T13:10:00Z" }, { processAttachment: fakeProc("HASH_AAA") });
     ok("نفس sha256 ⇒ duplicate", dupHash.status === "duplicate" && dupHash.reason === "attachment_sha256", JSON.stringify(dupHash));
     // ملف مختلف + مرجع مختلف + نفس المبلغ/النص ⇒ معاملة جديدة
-    const other = extractReceiptFields(REAL_TEXT.replace("9112092600655951", "9112092600777777"));
+    const other = extractReceiptFields(DB_TEXT.replace(TEST_REF, TEST_REF.slice(0, -2) + "77"));
     const newTxn = await createWhatsappIntake(client, { provider: TP, provider_message_id: "R3", sender_phone: TRUSTED,
       attachment_url: "https://app.trypeach.ai/rails/active_storage/blobs/redirect/x3/other.pdf",
       attachment_mime: "application/pdf", message_timestamp: "2026-09-12T13:20:00Z" },
@@ -86,7 +89,7 @@ async function main() {
     const doc = await createWhatsappIntake(client, { provider: TP, provider_message_id: "S1", sender_phone: TRUSTED,
       attachment_url: "https://app.trypeach.ai/rails/active_storage/blobs/redirect/s1/sib.pdf",
       attachment_mime: "application/pdf", message_timestamp: "2026-09-12T14:00:00Z" },
-      { processAttachment: fakeProc("HASH_SIB", extractReceiptFields(REAL_TEXT.replace("9112092600655951", "9112092600888888"))) });
+      { processAttachment: fakeProc("HASH_SIB", extractReceiptFields(DB_TEXT.replace(TEST_REF, TEST_REF.slice(0, -2) + "88"))) });
     const cap = await createWhatsappIntake(client, { provider: TP, provider_message_id: "S2", sender_phone: TRUSTED,
       original_message: "ديزل", message_timestamp: "2026-09-12T14:00:20Z" });
     const capRow = await getIntake(client, cap.id);

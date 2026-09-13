@@ -2511,6 +2511,212 @@ async function parseIntake(client, id, opts = {}) {
   return await getIntake(client, idS);
 }
 
+
+/* ─── P2.1: وكيل المبيعات — Shadow Mode (مسار العملاء، مستقل عن intake والمحاسبة) ─── */
+const salesEngine = require("../lib/sales-engine");
+const SALES_OPEN = ["new", "qualifying", "ready_for_confirmation", "ready_for_team", "human_handoff"];
+const SALES_MERGE_FIELDS = ["request_type", "requested_dimensions", "approx_area", "guest_count", "event_type",
+  "seating_style", "start_date", "end_date", "duration_days", "city", "location_details", "rental_mode", "date_hint"];
+// node-pg يعيد أعمدة date كـDate — نوحّدها نصاً YYYY-MM-DD قبل أي منطق أو عرض.
+function salesRowDates(row) {
+  if (!row) return row;
+  for (const k of ["start_date", "end_date"]) if (row[k]) row[k] = salesEngine.isoOf(row[k]);
+  return row;
+}
+
+// التوجيه: رقم الفريق ⇒ internal intake، أي رقم آخر ⇒ مسار المبيعات. (لا يمسّ /intake/whatsapp)
+function routeInboundTarget(members, e164) {
+  return findAllowlistMember(members, e164) ? "internal" : "sales";
+}
+
+function requireSalesUser(user, action = false) {
+  const allowed = action ? ["owner", "manager"] : ["owner", "manager", "viewer"];
+  if (!user || !allowed.includes(user.role)) {
+    const e = new Error("ليس لديك صلاحية على طلبات العملاء"); e.statusCode = 403; throw e;
+  }
+}
+
+async function handleSalesInbound(client, payload, opts = {}) {
+  const now = opts.now || new Date();
+  const e164 = normalizePhoneE164(payload.sender_phone);
+  if (!e164) { const e = new Error("رقم الهاتف غير صالح"); e.statusCode = 400; throw e; }
+  const members = await getIntakeAllowlist(client);
+  if (routeInboundTarget(members, e164) === "internal") return { routed: "internal", stored: false };
+
+  const provider = String(payload.provider || "peach");
+  const pmid = payload.provider_message_id != null ? String(payload.provider_message_id) : null;
+  if (pmid) {
+    const d = await client.query("select lead_id from sales_messages where provider=$1 and provider_message_id=$2 limit 1", [provider, pmid]);
+    if (d.rows[0]) return { routed: "sales", duplicate: true, stored: false, lead_id: d.rows[0].lead_id };
+  }
+
+  const text = String(payload.text ?? payload.original_message ?? "");
+  const contentType = payload.content_type || (payload.media_url || payload.attachment_url ? "document" : payload.location ? "location" : "text");
+  const mediaUrl = payload.media_url || payload.attachment_url || null;
+
+  // العميل الواحد له طلب مفتوح واحد؛ بعد handed_off/stale يبدأ طلب جديد.
+  let lead = (await client.query(
+    "select * from sales_leads where customer_phone=$1 and status = any($2) order by created_at desc limit 1", [e164, SALES_OPEN])).rows[0];
+  salesRowDates(lead);
+  if (!lead) {
+    lead = (await client.query(
+      `insert into sales_leads (customer_phone, customer_name, peach_contact_id, peach_conversation_id, status)
+       values ($1,$2,$3,$4,'new') returning *`,
+      [e164, payload.sender_name || null, payload.peach?.contact_id != null ? String(payload.peach.contact_id) : null,
+       payload.peach?.conversation_id != null ? String(payload.peach.conversation_id) : null])).rows[0];
+  }
+
+  const ex = salesEngine.extractSalesFields(text, now);
+  let mediaMeta = null;
+  if (mediaUrl) {
+    mediaMeta = { name: payload.attachment_name || null, mime: payload.attachment_mime || null };
+    if (opts.fetchAttachment !== false) {
+      try {
+        const proc = typeof opts.processAttachment === "function"
+          ? await opts.processAttachment(mediaUrl, payload.attachment_mime) : await processAttachment(mediaUrl, payload.attachment_mime);
+        mediaMeta.sha256 = proc?.sha256 || null; mediaMeta.extraction_status = proc?.status || null;
+        mediaMeta.bytes = proc?.bytes || null; mediaMeta.text_len = proc?.text_len || 0;
+      } catch (e) { mediaMeta.extraction_status = "error"; }
+    }
+  }
+  const loc = payload.location && payload.location.lat != null ? payload.location : null;
+
+  await client.query(
+    `insert into sales_messages (lead_id, provider, provider_message_id, direction, text, content_type, media_url, media_meta, extracted, message_timestamp)
+     values ($1,$2,$3,'in',$4,$5,$6,$7::jsonb,$8::jsonb,$9)`,
+    [lead.id, provider, pmid, text, contentType, mediaUrl, mediaMeta ? JSON.stringify(mediaMeta) : null,
+     JSON.stringify(ex), payload.message_timestamp || now.toISOString()]);
+
+  // ── الانتقالات ──
+  const L = { ...lead };
+  let ctx = { greeting: ex.greeting && lead.status === "new", priceAsked: ex.price_question, sizeInfoRequested: ex.size_info_request };
+  const prevStatus = lead.status;
+  const hadReq = JSON.stringify(lead.requested_dimensions || null);
+  const dimsKey = (arr) => (arr || []).map((d) => `${d.width}x${d.length}`).join(",");
+  const hadSug = dimsKey(lead.suggested_dimensions);
+  const changed = SALES_MERGE_FIELDS.some((f) => ex[f] != null);
+
+  if (prevStatus === "human_handoff" || ex.wants_human) {
+    L.status = "human_handoff";
+  } else if (prevStatus === "ready_for_team") {
+    // الطلب عند الفريق — نسجّل الرسالة ولا نغيّر الحالة
+  } else {
+    for (const f of SALES_MERGE_FIELDS) {
+      if (ex[f] == null) continue;
+      if (f === "request_type" && ex[f] === "tent" && L.request_type && L.request_type !== "tent") continue;
+      L[f] = ex[f];
+    }
+    if (ex.start_date) L.date_hint = null;
+    if (ex.size_unsure) L.size_unsure = true;
+    const extraNotes = [...(ex.extras || []), ex.guest_range ? `العدد تقريباً ${ex.guest_range}` : null].filter(Boolean);
+    if (extraNotes.length) {
+      const cur = new Set(String(L.customer_notes || "").split(" · ").filter(Boolean));
+      extraNotes.forEach((n) => cur.add(n));
+      L.customer_notes = [...cur].join(" · ");
+    }
+    if (loc) { L.location_lat = loc.lat; L.location_lng = loc.lng; if (loc.name) L.location_details = loc.name; }
+    if (contentType === "audio") L.customer_notes = [L.customer_notes, "أرسل رسالة صوتية — تحتاج استماع بشري"].filter(Boolean).join(" · ");
+    Object.assign(L, salesEngine.deriveSizing(L));
+    L.missing_fields = salesEngine.computeSalesMissing(L);
+    const qualified = salesEngine.isQualified(L.missing_fields);
+    if (prevStatus === "ready_for_confirmation" && ex.yes && !changed) L.status = "ready_for_team";
+    else L.status = qualified ? "ready_for_confirmation" : "qualifying";
+    ctx.nonstandardJustGiven = !!ex.requested_dimensions && L.dimensions_confidence === "nonstandard";
+    ctx.sizingJustDerived = !ex.requested_dimensions && dimsKey(L.suggested_dimensions) !== hadSug
+      && ["derived_from_area", "derived_from_guests"].includes(L.dimensions_confidence);
+  }
+  // حدّ عدم التقدّم: 12 رسالة عميل على نفس الطلب دون تأهيل ⇒ تحويل لإنسان
+  const inCount = (await client.query("select count(*)::int n from sales_messages where lead_id=$1 and direction='in'", [lead.id])).rows[0].n;
+  if (inCount >= 12 && ["new", "qualifying"].includes(L.status)) L.status = "human_handoff";
+
+  let reply = null, replyStatus = null, blockReason = null;
+  if (L.status === "human_handoff") replyStatus = null;
+  else if (prevStatus === "ready_for_team") reply = "طلبك عند الفريق وبيتواصلون معك قريباً. إذا عندك أي إضافة أرسلها وأضيفها لطلبك 🌿";
+  else reply = salesEngine.composeSalesReply(L, ctx);
+  if (reply) {
+    const g = salesEngine.guardSalesReply(reply);
+    if (g.ok) replyStatus = "pending"; else { blockReason = g.reason; reply = null; replyStatus = "blocked"; L.status = "human_handoff"; }
+  }
+
+  let teamSummary = lead.team_summary;
+  if (L.status === "ready_for_team" && prevStatus !== "ready_for_team") {
+    const att = (await client.query("select media_meta, content_type from sales_messages where lead_id=$1 and media_url is not null", [lead.id]))
+      .rows.map((r) => ({ name: r.media_meta?.name, content_type: r.content_type }));
+    teamSummary = salesEngine.buildTeamSummary(L, att);
+  }
+
+  await client.query(
+    `update sales_leads set status=$2, request_type=$3, requested_dimensions=$4::jsonb, suggested_dimensions=$5::jsonb,
+       dimensions_confidence=$6, size_unsure=$7, approx_area=$8, guest_count=$9, event_type=$10, seating_style=$11,
+       start_date=$12, end_date=$13, duration_days=$14, city=$15, location_details=$16, location_lat=$17, location_lng=$18,
+       customer_notes=$19, missing_fields=$20, suggested_reply=$21, suggested_reply_status=$22, reply_block_reason=$23,
+       team_summary=$24, customer_name=coalesce(customer_name,$25), last_customer_msg_at=$26,
+       rental_mode=$27, date_hint=$28, updated_at=now()
+     where id=$1`,
+    [lead.id, L.status, L.request_type || null, L.requested_dimensions ? JSON.stringify(L.requested_dimensions) : null,
+     L.suggested_dimensions ? JSON.stringify(L.suggested_dimensions) : null, L.dimensions_confidence || null, !!L.size_unsure,
+     L.approx_area || null, L.guest_count || null, L.event_type || null, L.seating_style || null,
+     L.start_date || null, L.end_date || null, L.duration_days || null, L.city || null, L.location_details || null,
+     L.location_lat || null, L.location_lng || null, L.customer_notes || null, L.missing_fields || [],
+     reply, replyStatus, blockReason, teamSummary || null, payload.sender_name || null, now.toISOString(),
+     L.rental_mode || null, L.date_hint || null]);
+  if (reply) {
+    await client.query(`insert into sales_messages (lead_id, provider, direction, text, content_type) values ($1,'wahet','out_suggested',$2,'text')`, [lead.id, reply]);
+  }
+  await logAgentAction(client, {
+    actorType: "agent", agentRole: "sales", action: "sales.inbound", targetType: "sales_lead", targetId: lead.id,
+    summary: `${prevStatus} → ${L.status}${blockReason ? " (رد محجوب: " + blockReason + ")" : ""}`,
+    afterState: { status: L.status, missing_fields: L.missing_fields || [] },
+  });
+  return { routed: "sales", stored: true, lead_id: lead.id, status: L.status, missing_fields: L.missing_fields || [],
+    suggested_reply: reply, reply_status: replyStatus, block_reason: blockReason };
+}
+
+async function listSalesLeads(client, { status } = {}) {
+  const params = []; let where = "";
+  if (status) { params.push(status); where = "where l.status = $1"; }
+  const r = await client.query(
+    `select l.*, (select text from sales_messages m where m.lead_id=l.id and m.direction='in' order by m.created_at desc limit 1) as last_message,
+            (select count(*)::int from sales_messages m where m.lead_id=l.id and m.media_url is not null) as attachments_count
+     from sales_leads l ${where} order by coalesce(l.last_customer_msg_at, l.created_at) desc limit 200`, params);
+  return r.rows.map(salesRowDates);
+}
+async function getSalesLead(client, id) {
+  const lead = salesRowDates((await client.query("select * from sales_leads where id=$1", [String(id || "")])).rows[0]);
+  if (!lead) { const e = new Error("الطلب غير موجود"); e.statusCode = 404; throw e; }
+  const messages = (await client.query(
+    "select id, direction, text, content_type, media_meta, extracted, message_timestamp, created_at from sales_messages where lead_id=$1 order by created_at", [lead.id])).rows;
+  return { ...lead, messages };
+}
+// Shadow Mode: الاعتماد يُسجَّل فقط — لا إرسال في P2.1.
+async function approveSalesReply(client, payload, user) {
+  requireSalesUser(user, true);
+  const lead = await getSalesLead(client, payload.id);
+  if (lead.suggested_reply_status !== "pending" || !lead.suggested_reply) {
+    const e = new Error("لا يوجد رد مقترح بانتظار الاعتماد"); e.statusCode = 409; throw e;
+  }
+  await client.query("update sales_leads set suggested_reply_status='approved', reply_approved_by=$2, reply_approved_at=now(), updated_at=now() where id=$1", [lead.id, user.id]);
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+    action: "sales.reply_approved", targetType: "sales_lead", targetId: lead.id, summary: "اعتماد الرد المقترح (وضع الظل — لم يُرسل)" });
+  return { id: lead.id, suggested_reply_status: "approved", sent: false };
+}
+async function handoffSalesLead(client, payload, user) {
+  requireSalesUser(user, true);
+  const lead = await getSalesLead(client, payload.id);
+  if (lead.status !== "ready_for_team") { const e = new Error(`لا يمكن التسليم من حالة ${lead.status}`); e.statusCode = 409; throw e; }
+  await client.query("update sales_leads set status='handed_off', handed_off_by=$2, handed_off_at=now(), updated_at=now() where id=$1", [lead.id, user.id]);
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+    action: "sales.handed_off", targetType: "sales_lead", targetId: lead.id, summary: "استلمه الفريق — التسعير يدوياً عبر دفترة" });
+  return { id: lead.id, status: "handed_off" };
+}
+async function markStaleSalesLeads(client, now = new Date(), days = 7) {
+  const r = await client.query(
+    `update sales_leads set status='stale', updated_at=now()
+     where status in ('new','qualifying','ready_for_confirmation') and coalesce(last_customer_msg_at, created_at) < $1::timestamptz - make_interval(days => $2)
+     returning id`, [now.toISOString(), days]);
+  return r.rowCount;
+}
+
 async function dashboard(client, user) {
   const finance = await listFinance(client);
   const quoteStates = await listQuoteStates(client);
@@ -2650,6 +2856,28 @@ module.exports = async function handler(req, res) {
     if (req.method === "POST" && path === "/intake/reject") {
       return res.status(200).json({ ok: true, data: await rejectIntake(client, req.body || {}, user) });
     }
+    // P2.1: وكيل المبيعات — Shadow Mode (لا إرسال واتساب، لا دفترة، لا finance)
+    if (req.method === "POST" && path === "/sales/inbound") {
+      const secret = process.env.INTAKE_SECRET;
+      if (!secret) return res.status(503).json({ ok: false, error: "INTAKE_SECRET غير مُعد على الخادم" });
+      if (String(req.headers["x-intake-secret"] || "") !== secret) return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
+      return res.status(200).json({ ok: true, data: await handleSalesInbound(client, req.body || {}) });
+    }
+    if (req.method === "GET" && path === "/sales/leads") {
+      requireSalesUser(user);
+      return res.status(200).json({ ok: true, data: await listSalesLeads(client, { status: query.status }) });
+    }
+    if (req.method === "GET" && path.startsWith("/sales/leads/")) {
+      requireSalesUser(user);
+      return res.status(200).json({ ok: true, data: await getSalesLead(client, decodeURIComponent(path.slice("/sales/leads/".length))) });
+    }
+    if (req.method === "POST" && path === "/sales/approve-reply") {
+      return res.status(200).json({ ok: true, data: await approveSalesReply(client, req.body || {}, user) });
+    }
+    if (req.method === "POST" && path === "/sales/handoff") {
+      return res.status(200).json({ ok: true, data: await handoffSalesLead(client, req.body || {}, user) });
+    }
+
     // M2.5: تحليل AI لسجل وارد (يشغّله الوكيل بمفتاح الخدمة أو مخوّل بشري)
     if (req.method === "POST" && path === "/intake/parse") {
       const secret = process.env.INTAKE_SECRET;
@@ -3037,4 +3265,9 @@ module.exports.__m26 = {
 // دوال P1.7 (المرفقات والاستخراج) لأغراض الاختبار فقط
 module.exports.__p17 = {
   fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS,
+};
+// دوال P2.1 (وكيل المبيعات) لأغراض الاختبار فقط
+module.exports.__p21 = {
+  handleSalesInbound, listSalesLeads, getSalesLead, approveSalesReply, handoffSalesLead,
+  markStaleSalesLeads, routeInboundTarget, requireSalesUser,
 };

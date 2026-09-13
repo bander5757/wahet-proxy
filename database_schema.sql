@@ -344,3 +344,69 @@ create index if not exists idx_agent_actions_target  on agent_actions(target_typ
 create index if not exists idx_agent_actions_created on agent_actions(created_at desc);
 create index if not exists idx_agent_actions_actor   on agent_actions(actor_type, agent_role);
 create index if not exists idx_agent_actions_action  on agent_actions(action);
+
+-- ═══ P2.1: وكيل المبيعات (Shadow Mode) — مستقل تماماً عن whatsapp_intake والمحاسبة ═══
+-- لا أسعار ولا دفترة: الوكيل يؤهّل الطلب ويسلّمه للفريق فقط.
+create table if not exists sales_leads (
+  id                     uuid primary key default gen_random_uuid(),
+  status                 text not null default 'new'
+    check (status in ('new','qualifying','ready_for_confirmation','ready_for_team','handed_off','human_handoff','stale')),
+  customer_name          text,
+  customer_phone         text not null,                 -- E.164
+  peach_contact_id       text,
+  peach_conversation_id  text,
+  request_type           text,          -- european_tent | bait_shaar | toilets | full_event | tent | other
+  request_type_raw       text,
+  requested_dimensions   jsonb,         -- ما قاله العميل حرفياً — لا يُستبدل بالاقتراح أبداً
+  suggested_dimensions   jsonb,         -- اقتراح قياسي منفصل
+  dimensions_confidence  text,          -- given | nonstandard | derived_from_area | derived_from_guests | unsure
+  size_unsure            boolean not null default false,
+  approx_area            numeric(10,2),
+  guest_count            integer,
+  event_type             text,
+  seating_style          text,          -- tables | majlis
+  start_date             date,
+  end_date               date,
+  duration_days          integer,
+  city                   text,
+  location_details       text,
+  location_lat           numeric(10,6),
+  location_lng           numeric(10,6),
+  customer_notes         text,
+  conversation_summary   text,
+  missing_fields         text[] not null default '{}',
+  suggested_reply        text,
+  suggested_reply_status text check (suggested_reply_status in ('pending','approved','blocked')),
+  reply_block_reason     text,
+  reply_approved_by      uuid references app_users(id),
+  reply_approved_at      timestamptz,
+  team_summary           text,
+  handed_off_by          uuid references app_users(id),
+  handed_off_at          timestamptz,
+  last_customer_msg_at   timestamptz,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+create index if not exists idx_sales_leads_phone  on sales_leads(customer_phone);
+create index if not exists idx_sales_leads_status on sales_leads(status);
+
+create table if not exists sales_messages (
+  id                   uuid primary key default gen_random_uuid(),
+  lead_id              uuid not null references sales_leads(id) on delete cascade,
+  provider             text not null default 'peach',
+  provider_message_id  text,
+  direction            text not null check (direction in ('in','out_suggested')),
+  text                 text,
+  content_type         text,          -- text | document | image | location | audio | ...
+  media_url            text,
+  media_meta           jsonb,         -- اسم/نوع/sha256/استخراج — تقني فقط
+  extracted            jsonb,         -- ما فهمه الوكيل من هذه الرسالة
+  message_timestamp    timestamptz,
+  created_at           timestamptz not null default now()
+);
+create unique index if not exists idx_sales_msg_provider
+  on sales_messages(provider, provider_message_id) where provider_message_id is not null;
+create index if not exists idx_sales_msg_lead on sales_messages(lead_id, created_at);
+-- P2.1: من محادثة عميل حقيقية — إيجار شهري، وموعد تقريبي بلا يوم ("نهاية شهر 10").
+alter table sales_leads add column if not exists rental_mode text;
+alter table sales_leads add column if not exists date_hint text;

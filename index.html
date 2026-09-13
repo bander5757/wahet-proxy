@@ -338,6 +338,7 @@
   <button class="tab-btn" onclick="setTab('clients')">العملاء</button>
   <button class="tab-btn" onclick="setTab('finance')">المحاسبة</button>
   <button class="tab-btn" onclick="setTab('intake')">📨 صندوق واتساب</button>
+  <button class="tab-btn" onclick="setTab('sales')">🛎️ طلبات العملاء</button>
   <button class="tab-btn" onclick="setTab('ops')">التركيبات</button>
   <button class="tab-btn" onclick="setTab('assets')">الموظفين والسيارات</button>
   <button class="tab-btn" onclick="setTab('tenders')">المنافسات</button>
@@ -359,6 +360,7 @@
     <button onclick="setTab('clients')"><span>👥</span><span>العملاء</span></button>
     <button onclick="setTab('finance')"><span>💰</span><span>المحاسبة</span></button>
     <button onclick="setTab('intake')"><span>📨</span><span>صندوق واتساب</span></button>
+    <button onclick="setTab('sales')"><span>🛎️</span><span>طلبات العملاء</span></button>
     <button onclick="setTab('ops')"><span>🔧</span><span>التركيبات</span></button>
     <button onclick="setTab('assets')"><span>🔔</span><span>الموظفين والسيارات</span></button>
     <button onclick="setTab('tenders')"><span>🎯</span><span>المنافسات</span></button>
@@ -547,6 +549,30 @@
       <div id="intake-allowlist-view"></div>
     </div>
     <div id="intake-list" class="mt-8"></div>
+  </div>
+</div>
+
+<div id="tab-sales" class="tab-page">
+  <div class="section">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">🛎️ طلبات العملاء</div>
+        <div style="font-size:11px;color:#9a9898;margin-top:2px">وكيل المبيعات في وضع الظل: يقترح الرد ولا يرسله. لا أسعار — التسعير يدوي عبر دفترة.</div>
+      </div>
+      <div style="min-width:160px">
+        <div class="label">الحالة</div>
+        <select id="sales-status-filter" onchange="loadSales()">
+          <option value="">الكل</option>
+          <option value="qualifying">قيد التأهيل</option>
+          <option value="ready_for_confirmation">بانتظار تأكيد العميل</option>
+          <option value="ready_for_team">جاهز للفريق</option>
+          <option value="handed_off">استلمه الفريق</option>
+          <option value="human_handoff">يحتاج موظف</option>
+          <option value="stale">متوقف</option>
+        </select>
+      </div>
+    </div>
+    <div id="sales-list" class="mt-8"></div>
   </div>
 </div>
 
@@ -990,6 +1016,7 @@
   <button onclick="setTab('clients')"><span class="bn-icon">👥</span><span>العملاء</span></button>
   <button onclick="setTab('finance')"><span class="bn-icon">📊</span><span>المحاسبة</span></button>
   <button onclick="setTab('intake')"><span class="bn-icon">📨</span><span>الصندوق</span></button>
+  <button onclick="setTab('sales')"><span class="bn-icon">🛎️</span><span>العملاء</span></button>
   <button onclick="setTab('ops')"><span class="bn-icon">🔧</span><span>التركيبات</span></button>
   <button onclick="setTab('assets')"><span class="bn-icon">🚗</span><span>الموظفين</span></button>
   <button onclick="setTab('tenders')"><span class="bn-icon">🤖</span><span>المنافسات</span></button>
@@ -2682,6 +2709,7 @@ function setTab(tab) {
   document.querySelectorAll('#side-nav button').forEach(b => b.classList.toggle('active', b.getAttribute('onclick')?.includes("'" + tab + "'")));
   closeSideMenu();
   if (tab === 'intake') loadIntake();
+  if (tab === 'sales') loadSales();
   if (tab !== 'clients') {
     const settingsPanel = document.getElementById('settings-panel');
     if (settingsPanel) settingsPanel.style.display = 'none';
@@ -5792,6 +5820,91 @@ async function editIntakeItem(id) {
   } catch(e) { showMsg('تعذر الحفظ: ' + e.message); }
 }
 
+/* ─── طلبات العملاء (P2.1 — Shadow Mode) ─── */
+let salesLeads = [];
+const SALES_STATUS_LABELS = { new:'جديد', qualifying:'قيد التأهيل', ready_for_confirmation:'بانتظار تأكيد العميل',
+  ready_for_team:'جاهز للفريق', handed_off:'استلمه الفريق', human_handoff:'يحتاج موظف', stale:'متوقف' };
+const SALES_TYPE_LABELS = { european_tent:'خيمة أوروبية', bait_shaar:'بيت شعر', toilets:'دورات مياه متنقلة',
+  full_event:'تجهيز فعالية متكامل', tent:'خيمة (النوع غير محدد)', other:'طلب آخر' };
+const SALES_FIELD_LABELS = { request_type:'نوع الطلب', tent_kind:'نوع الخيمة', size:'المساحة/الضيوف', event_details:'نوع المناسبة والجلسات',
+  start_date:'تاريخ البداية', end_date:'تاريخ النهاية', city:'المدينة' };
+function canActOnSales() { return !!currentUser && ['owner','manager'].includes(currentUser.role); }
+async function loadSales() {
+  const el = document.getElementById('sales-list');
+  if (!apiOnline) { if (el) el.innerHTML = '<div class="text-secondary" style="font-size:12px;padding:8px">يتطلب اتصال قاعدة البيانات</div>'; return; }
+  try {
+    const st = document.getElementById('sales-status-filter')?.value || '';
+    const res = await apiRequest('/sales/leads' + (st ? ('?status=' + encodeURIComponent(st)) : ''));
+    salesLeads = Array.isArray(res.data) ? res.data : [];
+    renderSales();
+  } catch(e) { showMsg('تعذر تحميل طلبات العملاء: ' + e.message); }
+}
+function salesDims(l) {
+  const r = l.requested_dimensions ? (l.requested_dimensions.raw || (l.requested_dimensions.width + '×' + l.requested_dimensions.length)) : '—';
+  const s = (l.suggested_dimensions || []).map(d => d.width + '×' + d.length).join(' أو ') || '—';
+  return { r, s };
+}
+function renderSales() {
+  const el = document.getElementById('sales-list');
+  if (!el) return;
+  if (!salesLeads.length) { el.innerHTML = '<div class="text-secondary" style="font-size:12px;padding:8px">لا توجد طلبات</div>'; return; }
+  const act = canActOnSales();
+  el.innerHTML = salesLeads.map(l => {
+    const d = salesDims(l);
+    const miss = (l.missing_fields || []).map(f => SALES_FIELD_LABELS[f] || f).join('، ') || '—';
+    const period = l.start_date ? (String(l.start_date).slice(0,10) + (l.end_date ? ' ← ' + String(l.end_date).slice(0,10) : '')) : '—';
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="flex-between mb-8">
+        <div><span style="font-size:13px;font-weight:600">${htmlEscape(l.customer_name || 'عميل')}</span>
+        <span style="font-size:11px;color:#9a9898"> · ${htmlEscape(l.customer_phone || '')}</span></div>
+        <span class="badge" style="font-size:10px">${htmlEscape(SALES_STATUS_LABELS[l.status] || l.status)}</span>
+      </div>
+      <div class="grid-2" style="font-size:11px;color:#9a9898;gap:4px">
+        <div>الطلب: ${htmlEscape(SALES_TYPE_LABELS[l.request_type] || '—')}</div>
+        <div>المدينة: ${htmlEscape(l.city || '—')}</div>
+        <div>الفترة: ${htmlEscape(period)}</div>
+        <div>الضيوف/المساحة: ${htmlEscape(String(l.guest_count || '—'))} / ${htmlEscape(l.approx_area ? l.approx_area + ' م²' : '—')}</div>
+        <div>المقاس المطلوب: ${htmlEscape(d.r)}</div>
+        <div>المقاس المقترح: ${htmlEscape(d.s)}</div>
+        <div>الناقص: ${htmlEscape(miss)}</div>
+        <div>المرفقات: ${htmlEscape(String(l.attachments_count || 0))}</div>
+      </div>
+      <div style="font-size:12px;margin-top:8px"><span style="color:#9a9898">آخر رسالة:</span> ${htmlEscape(l.last_message || '—')}</div>
+      ${l.suggested_reply ? `<div style="margin-top:8px;padding:8px;border:0.5px dashed #2e3244;border-radius:8px;font-size:12px;white-space:pre-wrap">
+        <div style="font-size:10px;color:#9a9898;margin-bottom:4px">الرد المقترح (${l.suggested_reply_status === 'approved' ? 'معتمد — لم يُرسل' : 'بانتظار الاعتماد'})</div>${htmlEscape(l.suggested_reply)}</div>` : ''}
+      ${l.reply_block_reason ? `<div style="font-size:11px;color:#E24B4A;margin-top:6px">حُجب الرد: ${htmlEscape(l.reply_block_reason)}</div>` : ''}
+      ${l.team_summary ? `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer">ملخص الفريق</summary>
+        <pre style="white-space:pre-wrap;font-size:12px;margin-top:6px">${htmlEscape(l.team_summary)}</pre></details>` : ''}
+      <div class="flex-between mt-8" style="gap:6px">
+        <button class="btn-secondary" style="flex:1" onclick="openSalesLead('${l.id}')">المحادثة</button>
+        ${act && l.suggested_reply_status === 'pending' ? `<button class="btn-primary" style="flex:1" onclick="approveSalesReplyUI('${l.id}')">اعتماد الرد</button>` : ''}
+        ${act && l.status === 'ready_for_team' ? `<button class="btn-primary" style="flex:1" onclick="handoffSalesUI('${l.id}')">استلمت — إلى دفترة</button>` : ''}
+      </div>
+      <div id="sales-thread-${l.id}"></div>
+    </div>`;
+  }).join('');
+}
+async function openSalesLead(id) {
+  const box = document.getElementById('sales-thread-' + id);
+  if (!box) return;
+  if (box.innerHTML) { box.innerHTML = ''; return; }
+  try {
+    const res = await apiRequest('/sales/leads/' + encodeURIComponent(id));
+    box.innerHTML = (res.data.messages || []).map(m => `<div style="font-size:12px;margin-top:6px;padding:6px;border-radius:6px;background:${m.direction === 'in' ? '#13161f' : 'transparent'};border:0.5px solid #2e3244">
+      <span style="font-size:10px;color:#9a9898">${m.direction === 'in' ? 'العميل' : 'رد مقترح'} · ${htmlEscape(m.content_type || '')}</span><br>${htmlEscape(m.text || (m.media_meta && m.media_meta.name) || '')}</div>`).join('');
+  } catch(e) { showMsg('تعذر فتح المحادثة: ' + e.message); }
+}
+async function approveSalesReplyUI(id) {
+  if (!confirm('اعتماد الرد المقترح؟ (وضع الظل: لن يُرسل للعميل)')) return;
+  try { await apiRequest('/sales/approve-reply', { method:'POST', body: JSON.stringify({ id }) }); showMsg('✅ اعتُمد (لم يُرسل)'); loadSales(); }
+  catch(e) { showMsg('تعذر الاعتماد: ' + e.message); }
+}
+async function handoffSalesUI(id) {
+  if (!confirm('تأكيد استلام الطلب؟ التسعير يتم يدوياً عبر دفترة.')) return;
+  try { await apiRequest('/sales/handoff', { method:'POST', body: JSON.stringify({ id }) }); showMsg('✅ استُلم الطلب'); loadSales(); }
+  catch(e) { showMsg('تعذر التسليم: ' + e.message); }
+}
+
 function render() {
   const safe = (name, fn, fallbackId) => {
     try { fn(); }
@@ -5804,6 +5917,7 @@ function render() {
   };
   safe('متابعة العملاء', renderClientOverview, 'pending-quotes-list');
   safe('صندوق واتساب', renderIntake, 'intake-list');
+  safe('طلبات العملاء', renderSales, 'sales-list');
   safe('حالة مزامنة دفترة', renderDaftraCapabilities, 'daftra-capabilities-view');
   safe('كانبان العملاء', () => {
     const kanban = document.getElementById('kanban');
