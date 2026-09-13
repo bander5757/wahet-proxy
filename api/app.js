@@ -1923,10 +1923,42 @@ async function createWhatsappIntake(client, payload, opts = {}) {
     );
     if (dup.rows[0]) return { status: "duplicate", reason: "provider_message_id", stored: false, existingId: dup.rows[0].id };
   }
-  // (2) دليل قوي: نفس المرفق لدى المزوّد ⇒ نفس المستند حرفياً
+  // معالجة المرفق (جلب + hash + استخراج) قبل الـdedup لأن الطبقات تعتمد عليها.
+  // معزولة تماماً: أي فشل لا يمنع حفظ الرسالة.
+  let attachmentProc = null, attachmentSha = null, txnRef = null, duplicateRefOf = null;
+  if (attachmentUrl && opts.fetchAttachment !== false) {
+    try {
+      attachmentProc = typeof opts.processAttachment === "function"
+        ? await opts.processAttachment(attachmentUrl, attachmentMime)
+        : await processAttachment(attachmentUrl, attachmentMime);
+    } catch (e) {
+      attachmentProc = { status: "error", reason: String(e && e.message || e).slice(0, 300) };
+    }
+    attachmentSha = attachmentProc?.sha256 || null;
+    txnRef = attachmentProc?.fields?.reference || null;
+  }
+
+  // (2) دليل قوي: نفس بصمة الملف ⇒ نفس المستند حرفياً (أقوى من الرابط)
+  if (attachmentSha) {
+    const dupS = await client.query("select id from whatsapp_intake where attachment_sha256 = $1 limit 1", [attachmentSha]);
+    if (dupS.rows[0]) return { status: "duplicate", reason: "attachment_sha256", stored: false, existingId: dupS.rows[0].id };
+  }
   if (attachmentUrl) {
     const dupA = await client.query("select id from whatsapp_intake where attachment_url = $1 limit 1", [attachmentUrl]);
     if (dupA.rows[0]) return { status: "duplicate", reason: "attachment", stored: false, existingId: dupA.rows[0].id };
+  }
+  // (3) مرجع العملية الموثوق من المستند
+  if (txnRef) {
+    const dupR = await client.query(
+      "select id, attachment_sha256 from whatsapp_intake where transaction_reference = $1 limit 1", [txnRef]);
+    if (dupR.rows[0]) {
+      // نفس المرجع ونفس الملف ⇒ تكرار مؤكد. نفس المرجع وملف مختلف ⇒ لا نرفض تلقائياً:
+      // قد تكون نسخة معاد إصدارها من نفس العملية ⇒ اشتباه يقرّره الإنسان.
+      if (attachmentSha && dupR.rows[0].attachment_sha256 === attachmentSha) {
+        return { status: "duplicate", reason: "transaction_reference", stored: false, existingId: dupR.rows[0].id };
+      }
+      duplicateRefOf = dupR.rows[0].id;
+    }
   }
   // (2ب) بصمة متطابقة تماماً (نفس المرسل والوقت والنص والمبلغ والمرفق)
   const dedupHash = computeIntakeDedupHash({ e164, messageTimestamp, amount, originalMessage, attachmentUrl });
@@ -1949,6 +1981,10 @@ async function createWhatsappIntake(client, payload, opts = {}) {
       duplicateReason = "مشابه لمعاملة سابقة خلال 24 ساعة: نفس المرسل ونفس النص، بلا دليل قاطع (مرفق/معرّف رسالة مختلف) — يحتاج قرار بشري";
     }
   }
+  if (duplicateRefOf && !duplicateOf) {
+    duplicateOf = duplicateRefOf;
+    duplicateReason = "نفس رقم مرجع العملية لمعاملة سابقة لكن الملف مختلف — قد تكون نسخة معاد إصدارها؛ يحتاج قرار بشري";
+  }
 
   // إدراج — status='new' (لا تحليل محاسبي في M1)
   try {
@@ -1957,14 +1993,15 @@ async function createWhatsappIntake(client, payload, opts = {}) {
          (provider, provider_message_id, sender_phone, sender_name, original_message,
           message_timestamp, source, raw_payload, dedup_hash, status,
           attachment_url, attachment_name, attachment_mime, attachment_meta,
-          duplicate_of, duplicate_reason)
-       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'new',$10,$11,$12,$13::jsonb,$14,$15)
+          duplicate_of, duplicate_reason, attachment_sha256, transaction_reference)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,'new',$10,$11,$12,$13::jsonb,$14,$15,$16,$17)
        returning id`,
       [provider, providerMessageId || null, e164, senderName, originalMessage,
        messageTimestamp, source, JSON.stringify(payload || {}), dedupHash,
        attachmentUrl, attachmentName, attachmentMime,
-       attachmentMeta != null ? JSON.stringify(attachmentMeta) : null,
-       duplicateOf, duplicateReason]
+       JSON.stringify(Object.assign({}, attachmentMeta || {},
+         attachmentProc ? { extraction: attachmentProc } : {})),
+       duplicateOf, duplicateReason, attachmentSha, txnRef]
     );
     const id = ins.rows[0].id;
     await logAgentAction(client, {
@@ -1999,6 +2036,32 @@ async function createWhatsappIntake(client, payload, opts = {}) {
         } catch (_) {}
       }
     }
+    // (D) ربط الرسالة الشقيقة: نفس المرسل خلال 60 ثانية، أحدهما بمرفق والآخر نص،
+    //     ومرشّح واحد فقط. عند تعدّد المرشحين لا نربط ولا نخمّن.
+    try {
+      const cand = await client.query(
+        `select id from whatsapp_intake
+         where id <> $1 and sender_phone = $2 and sibling_of is null
+           and abs(extract(epoch from (coalesce(message_timestamp, created_at) - $3::timestamptz))) <= 60
+           and ((attachment_url is null) <> ($4::boolean))
+         limit 2`,
+        [id, e164, messageTimestamp || new Date().toISOString(), !attachmentUrl]
+      );
+      if (cand.rows.length === 1) {
+        await client.query("update whatsapp_intake set sibling_of=$1, updated_at=now() where id=$2", [cand.rows[0].id, id]);
+        await logAgentAction(client, {
+          actorType: "system", action: "intake.sibling_linked", targetType: "whatsapp_intake", targetId: id,
+          summary: "رُبط بالرسالة الشقيقة (نفس المرسل خلال 60ث، مستند+نص، مرشّح واحد)",
+          afterState: { sibling_of: cand.rows[0].id },
+        });
+      } else if (cand.rows.length > 1) {
+        await logAgentAction(client, {
+          actorType: "system", action: "intake.sibling_ambiguous", targetType: "whatsapp_intake", targetId: id,
+          summary: "أكثر من مرشّح شقيق — لم يُربط، يحتاج قرار بشري",
+        });
+      }
+    } catch (_) { /* الربط تحسين لا يُسقط الاستقبال */ }
+
     if (duplicateOf && finalStatus !== "failed") {
       await client.query("update whatsapp_intake set status='needs_review', updated_at=now() where id=$1", [id]);
       finalStatus = "needs_review";
@@ -2013,6 +2076,87 @@ async function createWhatsappIntake(client, payload, opts = {}) {
     if (err.code === "23505") return { status: "duplicate", reason: "unique_violation", stored: false };
     throw err;
   }
+}
+
+
+/* ─── P1.7: جلب المرفق واستخراج بياناته ─── */
+
+// مضيفات المرفقات المسموحة حصراً (لا fetch عام ⇒ لا SSRF).
+const ATTACHMENT_HOSTS = new Set(["app.trypeach.ai"]);
+
+// يجلب المرفق ويحسب hash. لا يرمي أبداً: الفشل يعيد null فلا تُفقد الرسالة.
+async function fetchAttachment(url, timeoutMs = 12000) {
+  let u;
+  try { u = new URL(String(url || "")); } catch { return null; }
+  if (!["http:", "https:"].includes(u.protocol) || !ATTACHMENT_HOSTS.has(u.hostname)) return null;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(u.toString(), { redirect: "follow", signal: ac.signal });
+    if (!r.ok) return { ok: false, httpStatus: r.status };
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { ok: true, buf, bytes: buf.length,
+      contentType: r.headers.get("content-type") || null,
+      sha256: crypto.createHash("sha256").update(buf).digest("hex") };
+  } catch (e) { return { ok: false, error: e.name + ": " + e.message }; }
+  finally { clearTimeout(timer); }
+}
+
+// يبحث عن رقم قريب من تسمية (قبلها أو بعدها) — تخطيط PDF يقلب الترتيب أحياناً.
+function nearMatch(text, labelRe, valueRe, window = 60) {
+  const m = labelRe.exec(text);
+  if (!m) return null;
+  const labelStart = m.index, labelEnd = m.index + m[0].length;
+  const from = Math.max(0, labelStart - window);
+  const to = Math.min(text.length, labelEnd + window);
+  const slice = text.slice(from, to);
+  const re = new RegExp(valueRe.source, "g");
+  let best = null, bestDist = Infinity, mm;
+  while ((mm = re.exec(slice))) {
+    const aStart = from + mm.index, aEnd = aStart + mm[0].length;
+    const dist = aEnd <= labelStart ? labelStart - aEnd : (aStart >= labelEnd ? aStart - labelEnd : 0);
+    if (dist < bestDist) { bestDist = dist; best = mm[1] != null ? mm[1] : mm[0]; }
+  }
+  return best;
+}
+
+// استخراج حقول إيصال/فاتورة من نص مستخرج. ما لا يُوجَد يبقى null (لا تخمين).
+function extractReceiptFields(text) {
+  const t = String(text || "");
+  const num = (s) => { const n = Number(String(s).replace(/,/g, "")); return Number.isFinite(n) && n > 0 ? n : null; };
+  const amount = num(
+    nearMatch(t, /Total\s*Amount|المبلغ\s*الإجمالي|الإجمالي/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
+    || nearMatch(t, /Amount|المبلغ/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
+  );
+  const reference = nearMatch(t, /Payment\s*Reference\s*Number|Reference\s*Number|Transaction\s*(?:No|Number|ID)|رقم\s*العملية|الرقم\s*المرجعي/i, /(\d{8,24})/, 80);
+  const ibanM = t.match(/\bSA[0-9]{2}[0-9A-Z]{20}/);
+  const dateM = t.match(/\b(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})\b/);
+  const bankM = t.match(/alrajhi|rajhi|الراجحي|alinma|الإنماء|الاهلي|الأهلي|riyad|الرياض|sabb|ساب|anb|البلاد|albilad/i);
+  return {
+    amount, currency: /SAR|ر\.?\s?س|ريال/i.test(t) ? "SAR" : null,
+    reference: reference || null,
+    iban: ibanM ? ibanM[0] : null,
+    transaction_date: dateM ? `${dateM[1]}-${String(dateM[2]).padStart(2, "0")}-${String(dateM[3]).padStart(2, "0")}` : null,
+    bank: bankM ? bankM[0] : null,
+    doc_kind: /Transfer\s*Receipt|إشعار\s*تحويل|حوالة/i.test(t) ? "transfer_receipt"
+      : /Invoice|فاتورة/i.test(t) ? "invoice" : /Receipt|إيصال/i.test(t) ? "receipt" : null,
+  };
+}
+
+// يجلب المرفق ويستخرج ما أمكن. يُرجع دائماً كائناً (لا يرمي).
+async function processAttachment(url, mime) {
+  const got = await fetchAttachment(url);
+  if (!got) return { status: "skipped", reason: "host_not_allowed" };
+  if (!got.ok) return { status: "fetch_failed", reason: got.error || ("http_" + got.httpStatus) };
+  const isPdf = (got.contentType || "").includes("pdf") || (mime || "").includes("pdf");
+  let text = "", fields = {};
+  if (isPdf) {
+    try { text = pdfExtractText(got.buf) || ""; } catch (e) { text = ""; }
+    if (text) fields = extractReceiptFields(text);
+  }
+  return { status: text ? "extracted" : (isPdf ? "no_text" : "not_extractable"),
+    sha256: got.sha256, bytes: got.bytes, contentType: got.contentType,
+    text_len: text.length, text: text.slice(0, 4000), fields };
 }
 
 /* ─── WhatsApp Intake Review (M2): صندوق واتساب + مراجعة بشرية ─── */
@@ -2040,6 +2184,9 @@ function intakeRow(row) {
     status: row.status,
     rejection_reason: row.rejection_reason || "",
     duplicate_of: row.duplicate_of || null,
+    sibling_of: row.sibling_of || null,
+    attachment_sha256: row.attachment_sha256 || null,
+    transaction_reference: row.transaction_reference || null,
     duplicate_reason: row.duplicate_reason || "",
     parsed_data: row.parsed_data || null,
     final_data: row.final_data || null,
@@ -2330,13 +2477,20 @@ function finalizeIntakeParse(base, accIds, parserName) {
 async function parseIntake(client, id, opts = {}) {
   const idS = String(id || "").trim();
   if (!idS) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
-  const row = (await client.query("select id, status, original_message, parsed_data from whatsapp_intake where id = $1", [idS])).rows[0];
+  const row = (await client.query("select id, status, original_message, parsed_data, attachment_meta from whatsapp_intake where id = $1", [idS])).rows[0];
   if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
   if (!["new", "failed"].includes(row.status)) { const e = new Error(`لا يمكن تحليل سجل بحالة ${row.status}`); e.statusCode = 409; throw e; }
   const parser = opts.parser || getIntakeParser();
-  const base = await parser.classify(row.original_message || "");
+  // دمج: caption الرسالة + النص المستخرج من المستند (إن وُجد)
+  const ext = row.attachment_meta && row.attachment_meta.extraction ? row.attachment_meta.extraction : null;
+  const docText = ext && ext.text ? String(ext.text) : "";
+  const effectiveText = [row.original_message || "", docText].filter(Boolean).join("\n");
+  const base = await parser.classify(effectiveText);
+  // المبلغ المستخرج من المستند أوثق من نص الرسالة
+  if (ext && ext.fields && ext.fields.amount != null) base.amount = ext.fields.amount;
+  if (ext && ext.fields && ext.fields.currency) base.currency = ext.fields.currency;
   const accounts = (await client.query("select id, name from bank_accounts where is_active = true")).rows;
-  const accIds = resolveAccountsFromText(row.original_message || "", accounts);
+  const accIds = resolveAccountsFromText(effectiveText, accounts);
   const fin = finalizeIntakeParse(base, accIds, parser.name);
   await client.query(
     `update whatsapp_intake set
@@ -2879,4 +3033,8 @@ module.exports.__m25 = {
 // دوال M2.6 (إدارة الموثوقين) لأغراض الاختبار فقط
 module.exports.__m26 = {
   listIntakeAllowlist, upsertIntakeAllowlistMember, requireIntakeAdmin,
+};
+// دوال P1.7 (المرفقات والاستخراج) لأغراض الاختبار فقط
+module.exports.__p17 = {
+  fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS,
 };

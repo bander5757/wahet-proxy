@@ -294,6 +294,14 @@ create table if not exists whatsapp_intake (
 );
 
 -- منع التكرار حسب (المزوّد + معرّف رسالته)؛ نفس message_id قد يتكرر بين مزوّدين مختلفين.
+-- P1.7: مفاتيح مطابقة مستخرجة من المستند (تُفهرس ⇒ أعمدة لا jsonb).
+alter table whatsapp_intake add column if not exists attachment_sha256 text;
+alter table whatsapp_intake add column if not exists transaction_reference text;
+alter table whatsapp_intake add column if not exists sibling_of uuid references whatsapp_intake(id);
+create index if not exists idx_intake_att_sha on whatsapp_intake(attachment_sha256) where attachment_sha256 is not null;
+create index if not exists idx_intake_txn_ref on whatsapp_intake(transaction_reference) where transaction_reference is not null;
+create index if not exists idx_intake_sibling on whatsapp_intake(sibling_of) where sibling_of is not null;
+
 -- P1.5: الاشتباه بالتكرار (ليس رفضاً) — السجل يُخزَّن ويُعلَّم للمراجع البشري.
 alter table whatsapp_intake add column if not exists duplicate_of uuid references whatsapp_intake(id);
 alter table whatsapp_intake add column if not exists duplicate_reason text;
