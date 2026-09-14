@@ -2179,14 +2179,23 @@ function extractReceiptFields(text) {
     nearMatch(t, /Total\s*Amount|المبلغ\s*الإجمالي|الإجمالي/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
     || nearMatch(t, /Amount|المبلغ/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
   );
-  const reference = nearMatch(t, /Payment\s*Reference\s*Number|Reference\s*Number|Transaction\s*(?:No|Number|ID)|رقم\s*العملية|الرقم\s*المرجعي/i, /(\d{8,24})/, 80);
-  const ibanM = t.match(/\bSA[0-9]{2}[0-9A-Z]{20}/);
+  // IBAN قد يُكتب متصلاً أو بمجموعات مفصولة بمسافات (SA## #### ####…)
+  const ibanM = t.match(/\bSA\s?[0-9]{2}(?:\s?[0-9A-Z]){20}(?![0-9])/);
+  // المرجع: نبحث بعد إزالة الـIBAN حتى لا تُلتقط أرقامه كمرجع. بعض القوالب (مثل «بين حساباتي») لا تحوي مرجعاً أصلاً ⇒ null بلا تخمين
+  const tNoIban = ibanM ? t.replace(ibanM[0], " ") : t;
+  const reference = nearMatch(tNoIban,
+    /Payment\s*Reference\s*Number|Transaction\s*Reference|Reference\s*(?:Number|No\.?)|Ref\.?\s*No\.?|Transfer\s*(?:No|Number|Reference)|Transaction\s*(?:No|Number|ID)|رقم\s*العملية|الرقم\s*المرجعي|رقم\s*المرجع|رقم\s*الحوالة/i,
+    /(\d{8,24})/, 80);
+  const transferKind = /Between\s*my\s*accounts|بين\s*حساباتي/i.test(t) ? "own_accounts"
+    : /International\s*Transfer|حوالة\s*دولية/i.test(t) ? "international"
+    : /Local\s*Transfer/i.test(t) ? "local" : null;
   const dateM = t.match(/\b(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})\b/);
   const bankM = t.match(/alrajhi|rajhi|الراجحي|alinma|الإنماء|الاهلي|الأهلي|riyad|الرياض|sabb|ساب|anb|البلاد|albilad/i);
   return {
     amount, currency: /SAR|ر\.?\s?س|ريال/i.test(t) ? "SAR" : null,
     reference: reference || null,
-    iban: ibanM ? ibanM[0] : null,
+    iban: ibanM ? ibanM[0].replace(/\s/g, "") : null,
+    transfer_kind: transferKind,
     transaction_date: dateM ? `${dateM[1]}-${String(dateM[2]).padStart(2, "0")}-${String(dateM[3]).padStart(2, "0")}` : null,
     bank: bankM ? bankM[0] : null,
     doc_kind: /Transfer\s*Receipt|إشعار\s*تحويل|حوالة/i.test(t) ? "transfer_receipt"
@@ -2403,9 +2412,26 @@ function extractIntakeAmount(text) {
 }
 
 // تصنيف بقواعد حتمية (fallback مستقل عن أي مزوّد AI)
+/* فهم تعليق المعاملة (caption) — صيغ الشراء العربية واللهجات كلمات كاملة فقط
+   («شراكة» و«شراع» لا تُعدّ شراء). اسم المادة وحده (مثل «فريون») ليس قاعدة تصنيف. */
+const PURCHASE_VERB_RE = /(^|[\s،,.:؛\-])(?:تم\s+)?(شراء|شرا|اشتريت|اشترينا|اشتري|اشترى|شريت|شرينا|مشتريات)(?=$|[\s،,.:؛\-])/;
+// استبدالات حرف-بحرف فقط (تحافظ على المواضع لاقتطاع النص الأصلي)
+const normArabic1to1 = (s) => String(s || "").replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي");
+function parseFinancialCaption(text) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return { intent: null, description: null };
+  const m = normArabic1to1(raw).match(PURCHASE_VERB_RE);
+  if (!m) return { intent: null, description: raw.slice(0, 160) };
+  const verbEnd = m.index + m[0].length;
+  const object = raw.slice(verbEnd).replace(/^[\s،,.:؛\-]+/, "").trim();
+  const head = m[2] === "مشتريات" ? "مشتريات" : "شراء";
+  return { intent: "purchase", description: (object ? `${head} ${object}` : head).slice(0, 160) };
+}
+
 function ruleClassify(text) {
   const t = toLatinDigits(String(text || "")).toLowerCase();
   const has = (...ws) => ws.some((w) => t.includes(w));
+  const purchase = PURCHASE_VERB_RE.test(normArabic1to1(t));
   let classification = "unknown";
   const isTransfer = has("تحويل داخلي", "تحويل بين") ||
     ((has("تحويل", "حولت", "حوّلت")) && /من\s[\s\S]*(الى|إلى)\s/.test(t));
@@ -2414,7 +2440,7 @@ function ruleClassify(text) {
   else if (has("استرجاع", "استرداد", "مرتجع", "رد مبلغ", "ريفند")) classification = "refund";
   // "استلم" جذع يغطي استلمت/استلمنا/استلم. تجنّبنا "وصل" المجرّد لأنه يطابق "توصيل" (مصروف).
   else if (has("دفعة عميل", "تحصيل", "حصلت", "حصلنا", "استلم", "سدد العميل", "سدّد العميل", "إيراد", "ايراد", "وصلني", "وصلنا")) classification = "receipt";
-  else if (has("مصروف", "صرف", "دفعت", "اشتريت", "شراء", "فاتورة", "بنزين", "ديزل", "وقود", "صيانة", "زيت", "أجرة", "اجرة", "عمالة", "مواد")) classification = "expense";
+  else if (purchase || has("مصروف", "صرف", "دفعت", "اشتريت", "شراء", "فاتورة", "بنزين", "ديزل", "وقود", "صيانة", "زيت", "أجرة", "اجرة", "عمالة", "مواد")) classification = "expense";
   // تحديث تشغيلي: يعتمد على المحتوى لا على المرسِل. يُفحص فقط بعد استبعاد الأنواع المالية.
   else if (has("وصلنا الموقع", "وصلنا للموقع", "انتهى التركيب", "بدأنا التركيب", "جاري التركيب",
                "تم التركيب", "تم الفك", "نحتاج عمال", "نحتاج عمالة", "الفريق في", "تأخرنا",
@@ -2500,6 +2526,7 @@ function finalizeIntakeParse(base, accIds, parserName) {
     if (!source) missing.push("source_account_id");
     if (!dest) missing.push("destination_account_id");
   }
+  const reviewNote = base.review_note || null;
   let conf;
   if (classification === "unknown") conf = 0.2;
   else {
@@ -2511,12 +2538,15 @@ function finalizeIntakeParse(base, accIds, parserName) {
     else conf += 0.1;                        // custody/refund بلا حساب إلزامي
   }
   conf = Math.max(0, Math.min(1, Number(conf.toFixed(3))));
-  const status = (missing.length > 0 || conf < 0.6 || classification === "unknown") ? "needs_review" : "parsed";
+  // تعارض بين التعليق والمستند ⇒ مراجعة بشرية دائماً
+  const status = (missing.length > 0 || conf < 0.6 || classification === "unknown" || reviewNote) ? "needs_review" : "parsed";
   const parsed_data = {
     classification, amount, currency: base.currency || "SAR",
     source_account_id: source, destination_account_id: dest,
     supplier_name: base.supplier_name || null, project_name: base.project_name || null,
     confidence_score: conf, missing_fields: missing, parser: parserName,
+    description: base.description || null, review_note: reviewNote,
+    document: base.document || null,
   };
   return { parsed_data, classification, amount, currency: base.currency || "SAR",
     source_account_id: source, destination_account_id: dest,
@@ -2540,6 +2570,24 @@ async function parseIntake(client, id, opts = {}) {
   // المبلغ المستخرج من المستند أوثق من نص الرسالة
   if (ext && ext.fields && ext.fields.amount != null) base.amount = ext.fields.amount;
   if (ext && ext.fields && ext.fields.currency) base.currency = ext.fields.currency;
+  // التعليق يحدد الغرض والوصف؛ المستند يحدد طبيعة الحركة. لا نصنّف من اسم مادة وحده.
+  const cap = parseFinancialCaption(row.original_message);
+  base.description = cap.description;
+  if (cap.intent === "purchase" && base.classification === "unknown") base.classification = "expense";
+  const fields = (ext && ext.fields) || {};
+  if (fields.transfer_kind === "own_accounts") {
+    if (base.classification === "expense") {
+      base.classification = "internal_transfer";
+      base.review_note = "الإيصال تحويل بين حساباتك الخاصة بينما التعليق يذكر شراء — تحقّق: مصروف فعلي أم تحويل داخلي لتمويل الشراء؟";
+    } else if (base.classification === "unknown") {
+      base.classification = "internal_transfer";
+      base.review_note = "إيصال تحويل بين الحسابات — حدّد الحسابين";
+    }
+  }
+  if (ext && ext.fields) {
+    base.document = { doc_kind: fields.doc_kind || null, transfer_kind: fields.transfer_kind || null, bank: fields.bank || null,
+      transaction_date: fields.transaction_date || null, reference: fields.reference || null };
+  }
   const accounts = (await client.query("select id, name from bank_accounts where is_active = true")).rows;
   const accIds = resolveAccountsFromText(effectiveText, accounts);
   const fin = finalizeIntakeParse(base, accIds, parser.name);
@@ -2559,6 +2607,8 @@ async function parseIntake(client, id, opts = {}) {
     afterState: { classification: fin.classification, status: fin.status, missing_fields: fin.missing_fields },
     summary: `تحليل: ${fin.classification} (${Math.round(fin.confidence * 100)}%) → ${fin.status}`,
   });
+  // خصوصية: نص المستند الخام يُستخدم للتحليل فقط ثم يُحذف؛ تبقى الحقول المستخرجة والبصمة
+  await client.query("update whatsapp_intake set attachment_meta = attachment_meta #- '{extraction,text}' where id=$1 and attachment_meta ? 'extraction'", [idS]);
   return await getIntake(client, idS);
 }
 
@@ -3470,6 +3520,7 @@ module.exports.__m26 = {
 // دوال P1.7 (المرفقات والاستخراج) لأغراض الاختبار فقط
 module.exports.__p17 = {
   fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS,
+  parseFinancialCaption, ruleClassify,
 };
 // دوال P2.1 (وكيل المبيعات) لأغراض الاختبار فقط
 module.exports.__p21 = {

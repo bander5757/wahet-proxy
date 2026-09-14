@@ -92,8 +92,9 @@ async function main() {
   } finally {
     console.log("\n— تنظيف —");
     await client.query("update whatsapp_intake set duplicate_of=null where provider=$1", [TP]);
+    const testIds = (await client.query("select id from whatsapp_intake where provider=$1", [TP])).rows.map((r) => r.id);
+    const d2 = await client.query("delete from agent_actions where target_id = any($1)", [testIds]);
     const d1 = await client.query("delete from whatsapp_intake where provider=$1", [TP]);
-    const d2 = await client.query("delete from agent_actions where action like 'intake.%'");
     if (hadAl) await client.query("update app_settings set value=$1::jsonb where key='intake_allowlist'", [JSON.stringify(prevAl.rows[0].value)]);
     else await client.query("delete from app_settings where key='intake_allowlist'");
     console.log(`  حُذف: intake=${d1.rowCount} actions=${d2.rowCount}`);

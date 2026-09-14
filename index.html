@@ -5717,6 +5717,8 @@ function renderIntake() {
         <span class="badge" style="font-size:10px">${htmlEscape(st)}</span>
       </div>
       <div style="font-size:13px;white-space:pre-wrap;margin-bottom:8px">${htmlEscape(it.original_message || '')}</div>
+      ${it.parsed_data?.description ? `<div style="font-size:12px;margin-bottom:6px">الوصف: <b>${htmlEscape(it.parsed_data.description)}</b></div>` : ''}
+      ${it.parsed_data?.review_note ? `<div style="font-size:11px;color:#EF9F27;margin-bottom:6px">⚠️ ${htmlEscape(it.parsed_data.review_note)}</div>` : ''}
       <div class="grid-2" style="font-size:11px;color:#9a9898;gap:4px">
         <div>الوقت: ${it.message_timestamp ? String(it.message_timestamp).slice(0,16).replace('T',' ') : '—'}</div>
         <div>التصنيف: ${htmlEscape(it.classification || '—')}</div>

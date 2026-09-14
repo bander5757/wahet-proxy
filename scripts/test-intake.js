@@ -117,8 +117,12 @@ async function main() {
   } finally {
     // ── تنظيف تام ──
     console.log("\n— تنظيف بيانات الاختبار —");
+    // نحذف أفعال سجلات الاختبار فقط — لا نمسّ سجل التدقيق الحقيقي في staging
+    const testIds = (await client.query("select id from whatsapp_intake where provider = $1", [TEST_PROVIDER])).rows.map((r) => r.id);
+    // + سجل رفض الرقم غير الموثوق الذي يرسله الاختبار عمداً (بلا target بطبيعته)
+    const delAa = await client.query(
+      "delete from agent_actions where target_id = any($1) or (action = 'intake.reject_untrusted' and summary like '%+966559999999%')", [testIds]);
     const delWi = await client.query("delete from whatsapp_intake where provider = $1", [TEST_PROVIDER]);
-    const delAa = await client.query("delete from agent_actions where action like 'intake.%'");
     console.log(`  حُذف: whatsapp_intake=${delWi.rowCount}, agent_actions=${delAa.rowCount}`);
     // استرجاع allowlist
     if (hadAllowlist) {

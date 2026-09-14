@@ -84,8 +84,11 @@ async function main() {
     ok("finance_entries لم يتغيّر", (await client.query("select count(*)::int n from finance_entries")).rows[0].n === base.fin);
   } finally {
     console.log("\n— تنظيف —");
+    const testIds = (await client.query("select id from whatsapp_intake where provider=$1", [TP])).rows.map((r) => r.id);
+    const d2 = await client.query(
+      "delete from agent_actions where target_id = any($1) or actor_ref = any($2) or (action = 'intake.reject_untrusted' and summary like '%+966500000777%')",
+      [testIds, userIds]);
     const d1 = await client.query("delete from whatsapp_intake where provider=$1", [TP]);
-    const d2 = await client.query("delete from agent_actions where action like 'intake.%' or actor_ref = any($1)", [userIds]);
     const d3 = await client.query("delete from app_users where id = any($1)", [userIds]);
     if (hadAl) await client.query("update app_settings set value=$1::jsonb where key='intake_allowlist'", [JSON.stringify(prevAl.rows[0].value)]);
     else await client.query("delete from app_settings where key='intake_allowlist'");
