@@ -416,3 +416,37 @@ alter table sales_leads add column if not exists units_count int;            -- 
 alter table sales_leads add column if not exists requested_services text[];  -- التجهيز المتكامل: الخدمات المذكورة
 -- صلاحيات إضافية فوق الدور، مثل 'sales.review' (قراءة طلبات العملاء + اعتماد الرد + التسليم فقط)
 alter table app_users add column if not exists permissions text[] not null default '{}';
+
+-- P2.3: إرسال محكوم (staging) — فصل الاعتماد عن الإرسال + سجل إرسال كامل
+alter table sales_leads add column if not exists reply_approved_sha256 text;  -- بصمة النص المعتمد بالضبط
+alter table sales_leads drop constraint if exists sales_leads_suggested_reply_status_check;
+alter table sales_leads add constraint sales_leads_suggested_reply_status_check
+  check (suggested_reply_status in ('pending','approved','blocked','sent','send_failed'));
+alter table sales_messages drop constraint if exists sales_messages_direction_check;
+alter table sales_messages add constraint sales_messages_direction_check
+  check (direction in ('in','out_suggested','out_sent'));
+create table if not exists sales_outbound (
+  id                    uuid primary key default gen_random_uuid(),
+  lead_id               uuid not null references sales_leads(id) on delete cascade,
+  suggested_text        text not null,          -- النص المعتمد وقت التفويض
+  text_sha256           text not null,
+  approved_by           uuid references app_users(id),
+  approved_by_name      text,
+  approved_at           timestamptz,
+  sent_text             text,                   -- ما أُرسل فعلياً (يجب أن يطابق)
+  transport             text not null default 'peach_mcp',
+  peach_conversation_id text,
+  peach_message_id      text,
+  status                text not null default 'authorized' check (status in ('authorized','sent','failed','cancelled')),
+  error                 text,
+  authorized_at         timestamptz not null default now(),
+  sent_at               timestamptz,
+  created_at            timestamptz not null default now()
+);
+create index if not exists idx_sales_outbound_lead on sales_outbound(lead_id, created_at);
+-- تفويض مفتوح واحد فقط لكل طلب
+create unique index if not exists idx_sales_outbound_one_open on sales_outbound(lead_id) where status = 'authorized';
+
+-- جلسات: «تذكرني» + إلغاء من الخادم (logout)
+alter table app_sessions add column if not exists persistent boolean not null default false;
+alter table app_sessions add column if not exists revoked_at timestamptz;

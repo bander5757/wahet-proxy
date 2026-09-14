@@ -1085,7 +1085,8 @@ try { theme = localStorage.getItem('wk_theme') || 'light'; } catch(e) {}
 let currentUser = null;
 let authToken = '';
 try { currentUser = JSON.parse(localStorage.getItem('wk_current_user') || 'null'); } catch(e) { currentUser = null; }
-try { authToken = localStorage.getItem('wk_auth_token') || ''; } catch(e) {}
+/* الجلسة في كوكي HttpOnly يديره الخادم — لا token ولا كلمة مرور في localStorage (نمسح أي بقايا قديمة) */
+try { localStorage.removeItem('wk_auth_token'); } catch(e) {}
 let loginRequired = true;
 try { loginRequired = localStorage.getItem('wk_login_skipped') !== '1'; } catch(e) {}
 let tenders = [];
@@ -1660,7 +1661,8 @@ async function apiRequest(path, options = {}) {
   const res = await fetch(APP_API + path, {
     ...options,
     cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', ...(authToken ? { 'X-Wahet-Token': authToken } : {}), ...(options.headers || {}) },
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) throw new Error(data.error || 'فشل الاتصال بقاعدة البيانات');
@@ -1699,6 +1701,10 @@ async function loadAppData() {
     if (data.currentUser) {
       currentUser = data.currentUser;
       try { localStorage.setItem('wk_current_user', JSON.stringify(currentUser)); } catch(e) {}
+    } else if (loginRequired && currentUser) {
+      // الخادم لا يعرف الجلسة (انتهت/أُلغيت/لا يوجد كوكي) ⇒ لا نعتمد على المستخدم المخزّن محلياً
+      currentUser = null;
+      try { localStorage.removeItem('wk_current_user'); } catch(e) {}
     }
     if (data.settings?.daftra?.subdomain && data.settings?.daftra?.apikey) {
       cfg = normalizedCfg(data.settings.daftra);
@@ -1853,34 +1859,13 @@ function normalizeLoginIdentifier(value) {
 }
 async function loginWithValues(identifier, code, remember) {
   if (!code) { alert('أدخل كلمة المرور'); return false; }
-  if (!apiOnline) {
-    const localCodes = { 'بندر':'1111', 'ابو فايز':'Hamad1122', 'عمر':'waha1111', 'صدام':'waha2222' };
-    if (localCodes[identifier] && localCodes[identifier] !== code) {
-      alert('كلمة المرور غير صحيحة');
-      return false;
-    }
-    const localRoles = { 'بندر':'owner', 'ابو فايز':'viewer', 'عمر':'supervisor', 'صدام':'accountant' };
-    currentUser = { name: identifier, role: localRoles[identifier] || 'viewer' };
-    if (remember) {
-      try {
-        localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
-        localStorage.removeItem('wk_login_skipped');
-      } catch(e) {}
-    }
-    loginRequired = true;
-    renderUserStatus();
-    applyPermissions();
-    hideLoginScreen();
-    closeLogin();
-    showMsg('✅ دخول محلي: ' + identifier);
-    return true;
-  }
+  // لا دخول بدون الخادم: كلمات المرور لا تُكتب في الواجهة أبداً
+  if (!apiOnline) { alert('الخادم غير متاح حالياً — لا يمكن تسجيل الدخول'); return false; }
   try {
-    const res = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ identifier, code }) });
-    authToken = res.data.token;
+    const res = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ identifier, code, remember: !!remember }) });
     currentUser = res.data.user;
-    if (remember) {
-      localStorage.setItem('wk_auth_token', authToken);
+    // المخزّن محلياً بيانات عرض فقط؛ الصلاحية الفعلية من كوكي الجلسة ويتحقق منها الخادم عند كل تحميل
+    try {
       localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
       localStorage.removeItem('wk_login_skipped');
     }
@@ -1972,6 +1957,8 @@ async function loginUser() {
   await loginWithValues(identifier, code, remember);
 }
 function logoutUser() {
+  // إلغاء الجلسة على الخادم + مسح الكوكي (لا ننتظر؛ الواجهة تُمسح فوراً)
+  if (apiOnline) apiRequest('/auth/logout', { method: 'POST', body: '{}' }).catch(() => {});
   authToken = '';
   currentUser = null;
   try {
@@ -5897,7 +5884,7 @@ async function openSalesLead(id) {
   try {
     const res = await apiRequest('/sales/leads/' + encodeURIComponent(id));
     box.innerHTML = (res.data.messages || []).map(m => `<div style="font-size:12px;margin-top:6px;padding:6px;border-radius:6px;background:${m.direction === 'in' ? '#13161f' : 'transparent'};border:0.5px solid #2e3244">
-      <span style="font-size:10px;color:#9a9898">${m.direction === 'in' ? 'العميل' : 'رد مقترح'} · ${htmlEscape(m.content_type || '')}</span><br>${htmlEscape(m.text || (m.media_meta && m.media_meta.name) || '')}</div>`).join('');
+      <span style="font-size:10px;color:#9a9898">${m.direction === 'in' ? 'العميل' : m.direction === 'out_sent' ? '✅ أُرسل فعلياً' : 'رد مقترح'} · ${htmlEscape(m.content_type || '')}</span><br>${htmlEscape(m.text || (m.media_meta && m.media_meta.name) || '')}</div>`).join('');
   } catch(e) { showMsg('تعذر فتح المحادثة: ' + e.message); }
 }
 async function approveSalesReplyUI(id) {

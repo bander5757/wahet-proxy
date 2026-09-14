@@ -496,6 +496,47 @@ function sha256(value) {
   return crypto.createHash("sha256").update(String(value)).digest("hex");
 }
 
+/* ─── كلمات المرور والجلسات ───
+   scrypt بملح لكل مستخدم: "scrypt$<salt>$<hash>". الصيغة القديمة (sha256 بلا ملح) تُقبل وتُرقّى تلقائياً عند أول دخول. */
+function hashLoginCode(code) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(code), salt, 64);
+  return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+function verifyLoginCode(code, stored) {
+  if (!stored) return { ok: false, legacy: false };
+  if (stored.startsWith("scrypt$")) {
+    const [, saltB64, hashB64] = stored.split("$");
+    const expected = Buffer.from(hashB64, "base64");
+    const got = crypto.scryptSync(String(code), Buffer.from(saltB64, "base64"), expected.length);
+    return { ok: expected.length === got.length && crypto.timingSafeEqual(expected, got), legacy: false };
+  }
+  const a = Buffer.from(sha256(code)), b = Buffer.from(String(stored));
+  return { ok: a.length === b.length && crypto.timingSafeEqual(a, b), legacy: true };
+}
+const SESSION_COOKIE = "wahet_session";
+const SESSION_PERSISTENT_DAYS = 30;   // «تذكرني على هذا الجهاز»
+const SESSION_SHORT_HOURS = 12;       // بدون تذكرني: كوكي جلسة المتصفح + حد أقصى 12 ساعة على الخادم
+function parseCookies(header) {
+  const out = {};
+  for (const part of String(header || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+// HttpOnly: لا يقرؤه JavaScript الصفحة؛ بدون Max-Age = كوكي جلسة يُحذف بإغلاق المتصفح
+function sessionCookie(token, persistent) {
+  const base = `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+  return persistent ? `${base}; Max-Age=${SESSION_PERSISTENT_DAYS * 86400}` : base;
+}
+const clearSessionCookie = () => `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+async function revokeSession(client, token) {
+  if (!token) return 0;
+  const r = await client.query("update app_sessions set revoked_at=now() where token_hash=$1 and revoked_at is null", [sha256(token)]);
+  return r.rowCount;
+}
+
 function publicUser(row) {
   if (!row) return null;
   return {
@@ -539,15 +580,20 @@ async function login(client, payload) {
     [identifier]
   );
   const user = result.rows[0];
-  if (!user || user.login_code_hash !== sha256(code)) {
+  const check = verifyLoginCode(code, user && user.login_code_hash);
+  if (!user || !check.ok) {
     const err = new Error("بيانات الدخول غير صحيحة");
     err.statusCode = 401;
     throw err;
   }
+  // ترقية الصيغة القديمة إلى scrypt بصمت
+  if (check.legacy) await client.query("update app_users set login_code_hash=$2 where id=$1", [user.id, hashLoginCode(code)]);
+  const persistent = payload.remember === true;
   const token = crypto.randomBytes(32).toString("hex");
-  await client.query(
-    "insert into app_sessions (user_id, token_hash, expires_at) values ($1, $2, now() + interval '30 days')",
-    [user.id, sha256(token)]
+  const expires = persistent ? `${SESSION_PERSISTENT_DAYS} days` : `${SESSION_SHORT_HOURS} hours`;
+  const s = await client.query(
+    `insert into app_sessions (user_id, token_hash, expires_at, persistent) values ($1, $2, now() + $3::interval, $4) returning expires_at`,
+    [user.id, sha256(token), expires, persistent]
   );
   return { token, user: publicUser(user) };
 }
@@ -2726,7 +2772,9 @@ async function approveSalesReply(client, payload, user) {
   if (lead.suggested_reply_status !== "pending" || !lead.suggested_reply) {
     const e = new Error("لا يوجد رد مقترح بانتظار الاعتماد"); e.statusCode = 409; throw e;
   }
-  await client.query("update sales_leads set suggested_reply_status='approved', reply_approved_by=$2, reply_approved_at=now(), updated_at=now() where id=$1", [lead.id, user.id]);
+  // بصمة النص المعتمد: أي تغيير لاحق في suggested_reply يُبطل الاعتماد عند الإرسال
+  await client.query("update sales_leads set suggested_reply_status='approved', reply_approved_by=$2, reply_approved_at=now(), reply_approved_sha256=$3, updated_at=now() where id=$1",
+    [lead.id, user.id, sha256(lead.suggested_reply)]);
   await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
     action: "sales.reply_approved", targetType: "sales_lead", targetId: lead.id, summary: "اعتماد الرد المقترح (وضع الظل — لم يُرسل)" });
   return { id: lead.id, suggested_reply_status: "approved", sent: false };
@@ -2740,6 +2788,106 @@ async function handoffSalesLead(client, payload, user) {
     action: "sales.handed_off", targetType: "sales_lead", targetId: lead.id, summary: "استلمه الفريق — التسعير يدوياً عبر دفترة" });
   return { id: lead.id, status: "handed_off" };
 }
+/* ─── P2.3: إرسال محكوم — الاعتماد منفصل عن الإرسال ───
+   approve-and-send: يعتمد (إن لزم) ثم يمرّر كل البوابات ثم يُنشئ تفويض إرسال بالنص المعتمد حرفياً.
+   النقل الفعلي خارج هذه الدالة (حالياً Peach Co-Pilot MCP بإشراف بشري؛ لاحقاً Peach API)،
+   ثم send-result يسجّل النتيجة ويتحقق أن المُرسل = المعتمد. */
+const SALES_SEND_WINDOW_MS = 24 * 3600 * 1000 - 5 * 60 * 1000; // هامش 5 دقائق قبل إغلاق النافذة
+async function getSalesSendSettings(client) {
+  const r = await client.query("select value from app_settings where key='sales_send'");
+  const v = r.rows[0]?.value || {};
+  return { enabled: v.enabled === true, allowed_phones: Array.isArray(v.allowed_phones) ? v.allowed_phones : [] };
+}
+async function setSalesSendSettings(client, payload, user) {
+  if (!user || user.role !== "owner") { const e = new Error("مفتاح الإرسال لمالك النظام فقط"); e.statusCode = 403; throw e; }
+  const before = await getSalesSendSettings(client);
+  const next = {
+    enabled: payload.enabled === true,
+    allowed_phones: (Array.isArray(payload.allowed_phones) ? payload.allowed_phones : before.allowed_phones)
+      .map((p) => normalizePhoneE164(p)).filter(Boolean),
+  };
+  await client.query(`insert into app_settings (key,value) values ('sales_send',$1::jsonb)
+    on conflict (key) do update set value=excluded.value`, [JSON.stringify(next)]);
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+    action: next.enabled ? "sales.send_enabled" : "sales.send_disabled", targetType: "app_settings", targetId: null,
+    summary: `الإرسال ${next.enabled ? "مفعّل" : "موقوف"} — أرقام مسموحة: ${next.allowed_phones.length}`, beforeState: before, afterState: next });
+  return next;
+}
+// كل بوابات الإرسال — تعيد قائمة الموانع (فارغة = مسموح)
+async function salesSendBlockers(client, lead, now = new Date()) {
+  const b = [];
+  if (process.env.SALES_SEND_HARD_OFF === "1") b.push("kill_switch_env");
+  const s = await getSalesSendSettings(client);
+  if (!s.enabled) b.push("kill_switch_off");
+  if (s.allowed_phones.length && !s.allowed_phones.includes(lead.customer_phone)) b.push("phone_not_in_test_allowlist");
+  if (!s.allowed_phones.length) b.push("test_allowlist_empty"); // مرحلة الاختبار: لا إرسال بلا قائمة صريحة
+  if (routeInboundTarget(await getIntakeAllowlist(client), lead.customer_phone) === "internal") b.push("team_number");
+  if (!lead.peach_conversation_id) b.push("no_conversation");
+  const last = (await client.query("select max(message_timestamp) t from sales_messages where lead_id=$1 and direction='in'", [lead.id])).rows[0].t;
+  if (!last || now.getTime() - new Date(last).getTime() > SALES_SEND_WINDOW_MS) b.push("reply_window_closed");
+  if (!lead.suggested_reply) b.push("no_suggested_reply");
+  else {
+    if (lead.suggested_reply_status !== "approved") b.push("not_approved");
+    if (!lead.reply_approved_sha256 || sha256(lead.suggested_reply) !== lead.reply_approved_sha256) b.push("text_changed_after_approval");
+    const g = salesEngine.guardSalesReply(lead.suggested_reply);
+    if (!g.ok) b.push("guardrail:" + g.reason);
+  }
+  if (["human_handoff", "handed_off", "stale"].includes(lead.status)) b.push("lead_status_" + lead.status);
+  return b;
+}
+async function approveAndSendSalesReply(client, payload, user, opts = {}) {
+  requireSalesUser(user, true);
+  let lead = await getSalesLead(client, payload.id);
+  if (lead.suggested_reply_status === "pending" && lead.suggested_reply) {
+    await approveSalesReply(client, { id: lead.id }, user);
+    lead = await getSalesLead(client, lead.id);
+  }
+  const blockers = await salesSendBlockers(client, lead, opts.now || new Date());
+  if (blockers.length) {
+    await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+      action: "sales.send_refused", targetType: "sales_lead", targetId: lead.id, status: "failed", summary: blockers.join(", ") });
+    const e = new Error("الإرسال مرفوض: " + blockers.join("، ")); e.statusCode = 409; e.blockers = blockers; throw e;
+  }
+  let ob;
+  try {
+    ob = (await client.query(
+      `insert into sales_outbound (lead_id, suggested_text, text_sha256, approved_by, approved_by_name, approved_at, transport, peach_conversation_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+      [lead.id, lead.suggested_reply, lead.reply_approved_sha256, lead.reply_approved_by, user.name, lead.reply_approved_at,
+       opts.transport || "peach_mcp", lead.peach_conversation_id])).rows[0];
+  } catch (err) {
+    if (err.code === "23505") { const e = new Error("يوجد تفويض إرسال مفتوح لهذا الطلب"); e.statusCode = 409; throw e; }
+    throw err;
+  }
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+    action: "sales.send_authorized", targetType: "sales_lead", targetId: lead.id,
+    summary: `تفويض إرسال ${ob.id} عبر ${ob.transport}`, afterState: { outbound_id: ob.id, sha256: ob.text_sha256 } });
+  return { outbound_id: ob.id, status: "authorized", transport: ob.transport, conversation_id: ob.peach_conversation_id, text: ob.suggested_text };
+}
+async function recordSalesSendResult(client, payload, user) {
+  requireSalesUser(user, true);
+  const ob = (await client.query("select * from sales_outbound where id=$1", [String(payload.outbound_id || "")])).rows[0];
+  if (!ob) { const e = new Error("تفويض الإرسال غير موجود"); e.statusCode = 404; throw e; }
+  if (ob.status !== "authorized") { const e = new Error(`التفويض ليس مفتوحاً (${ob.status})`); e.statusCode = 409; throw e; }
+  const sentText = payload.sent_text != null ? String(payload.sent_text) : null;
+  let ok = payload.ok === true, error = payload.error ? String(payload.error).slice(0, 500) : null;
+  if (ok && (sentText == null || sha256(sentText) !== ob.text_sha256)) { ok = false; error = "النص المُرسل لا يطابق النص المعتمد"; }
+  const pmid = payload.peach_message_id != null ? String(payload.peach_message_id) : null;
+  await client.query("update sales_outbound set status=$2, sent_text=$3, peach_message_id=$4, error=$5, sent_at=case when $2='sent' then now() else sent_at end where id=$1",
+    [ob.id, ok ? "sent" : "failed", sentText, pmid, error]);
+  await client.query("update sales_leads set suggested_reply_status=$2, updated_at=now() where id=$1 and reply_approved_sha256=$3",
+    [ob.lead_id, ok ? "sent" : "send_failed", ob.text_sha256]);
+  if (ok) {
+    await client.query(`insert into sales_messages (lead_id, provider, provider_message_id, direction, text, content_type, extracted, message_timestamp)
+      values ($1,'peach',$2,'out_sent',$3,'text',$4::jsonb, now())`, [ob.lead_id, pmid, sentText, JSON.stringify({ outbound_id: ob.id })]);
+  }
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, agentRole: "sales",
+    action: ok ? "sales.sent" : "sales.send_failed", targetType: "sales_lead", targetId: ob.lead_id, status: ok ? "done" : "failed",
+    summary: ok ? `أُرسل عبر ${ob.transport} — رسالة ${pmid || "?"}` : `فشل الإرسال: ${error}`, errorMessage: ok ? null : error,
+    afterState: { outbound_id: ob.id, peach_message_id: pmid } });
+  return { outbound_id: ob.id, status: ok ? "sent" : "failed", error };
+}
+
 async function markStaleSalesLeads(client, now = new Date(), days = 7) {
   const r = await client.query(
     `update sales_leads set status='stale', updated_at=now()
@@ -2842,11 +2990,23 @@ module.exports = async function handler(req, res) {
     client = await getPool().connect();
     const requestUrl = new URL(req.url || "/", "http://local");
     const query = { ...(req.query || {}), ...Object.fromEntries(requestUrl.searchParams.entries()) };
-    const token = req.headers["x-wahet-token"] || "";
+    // الجلسة من كوكي HttpOnly (المتصفح)، أو من الترويسة للأدوات والسكربتات
+    const token = req.headers["x-wahet-token"] || parseCookies(req.headers.cookie)[SESSION_COOKIE] || "";
     const user = await getUserFromToken(client, token);
 
     if (req.method === "POST" && path === "/auth/login") {
-      return res.status(200).json({ ok: true, data: await login(client, req.body || {}) });
+      const r = await login(client, req.body || {});
+      res.setHeader("Set-Cookie", sessionCookie(r.token, r.persistent));
+      return res.status(200).json({ ok: true, data: { user: r.user, persistent: r.persistent, expires_at: r.expires_at } });
+    }
+    if (req.method === "POST" && path === "/auth/logout") {
+      const revoked = await revokeSession(client, token);
+      res.setHeader("Set-Cookie", clearSessionCookie());
+      return res.status(200).json({ ok: true, data: { revoked } });
+    }
+    if (req.method === "GET" && path === "/auth/me") {
+      if (!user) return res.status(401).json({ ok: false, error: "لا توجد جلسة صالحة" });
+      return res.status(200).json({ ok: true, data: { user } });
     }
 
     // WhatsApp Intake (M1): استقبال آلي عبر مفتاح خدمة (machine-to-machine)
@@ -2904,6 +3064,16 @@ module.exports = async function handler(req, res) {
     }
     if (req.method === "POST" && path === "/sales/approve-reply") {
       return res.status(200).json({ ok: true, data: await approveSalesReply(client, req.body || {}, user) });
+    }
+    // P2.3: الإرسال منفصل تماماً عن /sales/approve-reply (الذي لا يرسل أبداً)
+    if (req.method === "POST" && path === "/sales/approve-and-send") {
+      return res.status(200).json({ ok: true, data: await approveAndSendSalesReply(client, req.body || {}, user) });
+    }
+    if (req.method === "POST" && path === "/sales/send-result") {
+      return res.status(200).json({ ok: true, data: await recordSalesSendResult(client, req.body || {}, user) });
+    }
+    if (req.method === "POST" && path === "/sales/send-settings") {
+      return res.status(200).json({ ok: true, data: await setSalesSendSettings(client, req.body || {}, user) });
     }
     if (req.method === "POST" && path === "/sales/handoff") {
       return res.status(200).json({ ok: true, data: await handoffSalesLead(client, req.body || {}, user) });
@@ -3301,4 +3471,10 @@ module.exports.__p17 = {
 module.exports.__p21 = {
   handleSalesInbound, listSalesLeads, getSalesLead, approveSalesReply, handoffSalesLead,
   markStaleSalesLeads, routeInboundTarget, requireSalesUser, hasPermission, getUserFromToken, KNOWN_PERMISSIONS,
+};
+module.exports.__auth = {
+  hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
+};
+module.exports.__p23 = {
+  approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
 };
