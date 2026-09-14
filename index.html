@@ -5827,8 +5827,12 @@ const SALES_STATUS_LABELS = { new:'جديد', qualifying:'قيد التأهيل'
 const SALES_TYPE_LABELS = { european_tent:'خيمة أوروبية', bait_shaar:'بيت شعر', toilets:'دورات مياه متنقلة',
   full_event:'تجهيز فعالية متكامل', tent:'خيمة (النوع غير محدد)', other:'طلب آخر' };
 const SALES_FIELD_LABELS = { request_type:'نوع الطلب', tent_kind:'نوع الخيمة', size:'المساحة/الضيوف', event_details:'نوع المناسبة والجلسات',
-  start_date:'تاريخ البداية', end_date:'تاريخ النهاية', city:'المدينة' };
-function canActOnSales() { return !!currentUser && ['owner','manager'].includes(currentUser.role); }
+  start_date:'تاريخ البداية', end_date:'تاريخ النهاية', city:'المدينة', use_type:'نوع الجلسة (اختياري)', quantity:'عدد الوحدات',
+  expected_users:'عدد الحضور (اختياري)', guest_count:'عدد الضيوف', event_type:'نوع المناسبة', services:'الخدمات (اختياري)' };
+/* الاعتماد/التسليم: owner/manager، أو أي مستخدم لديه صلاحية sales.review فقط (مثل أبو فايز) */
+function canActOnSales() {
+  return !!currentUser && (['owner','manager'].includes(currentUser.role) || (currentUser.permissions || []).includes('sales.review'));
+}
 async function loadSales() {
   const el = document.getElementById('sales-list');
   if (!apiOnline) { if (el) el.innerHTML = '<div class="text-secondary" style="font-size:12px;padding:8px">يتطلب اتصال قاعدة البيانات</div>'; return; }
@@ -5868,6 +5872,8 @@ function renderSales() {
         <div>المقاس المقترح: ${htmlEscape(d.s)}</div>
         <div>الناقص: ${htmlEscape(miss)}</div>
         <div>المرفقات: ${htmlEscape(String(l.attachments_count || 0))}</div>
+        ${l.units_count ? `<div>عدد الوحدات: ${htmlEscape(String(l.units_count))}</div>` : ''}
+        ${(l.requested_services || []).length ? `<div>الخدمات: ${htmlEscape(l.requested_services.join('، '))}</div>` : ''}
       </div>
       <div style="font-size:12px;margin-top:8px"><span style="color:#9a9898">آخر رسالة:</span> ${htmlEscape(l.last_message || '—')}</div>
       ${l.suggested_reply ? `<div style="margin-top:8px;padding:8px;border:0.5px dashed #2e3244;border-radius:8px;font-size:12px;white-space:pre-wrap">

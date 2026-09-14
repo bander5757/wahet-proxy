@@ -504,13 +504,16 @@ function publicUser(row) {
     phone: row.phone,
     email: row.email,
     role: row.role,
+    // صلاحيات دقيقة إضافية فوق الدور (مثل sales.review) — لا تمنح صلاحيات إدارية عامة
+    permissions: Array.isArray(row.permissions) ? row.permissions : [],
   };
 }
 
 async function getUserFromToken(client, token) {
   if (!token) return null;
+  // to_jsonb(u)->'permissions' يتحمّل غياب العمود (قاعدة لم تُطبَّق عليها الهجرة بعد)
   const result = await client.query(
-    `select u.id, u.name, u.phone, u.email, u.role
+    `select u.id, u.name, u.phone, u.email, u.role, to_jsonb(u)->'permissions' as permissions
      from app_sessions s
      join app_users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now() and u.is_active = true
@@ -529,9 +532,9 @@ async function login(client, payload) {
     throw err;
   }
   const result = await client.query(
-    `select id, name, phone, email, role, login_code_hash
-     from app_users
-     where is_active = true and (email = $1 or phone = $1 or name = $1)
+    `select u.id, u.name, u.phone, u.email, u.role, u.login_code_hash, to_jsonb(u)->'permissions' as permissions
+     from app_users u
+     where u.is_active = true and (u.email = $1 or u.phone = $1 or u.name = $1)
      limit 1`,
     [identifier]
   );
@@ -2516,7 +2519,8 @@ async function parseIntake(client, id, opts = {}) {
 const salesEngine = require("../lib/sales-engine");
 const SALES_OPEN = ["new", "qualifying", "ready_for_confirmation", "ready_for_team", "human_handoff"];
 const SALES_MERGE_FIELDS = ["request_type", "requested_dimensions", "approx_area", "guest_count", "event_type",
-  "seating_style", "start_date", "end_date", "duration_days", "city", "location_details", "rental_mode", "date_hint"];
+  "seating_style", "start_date", "end_date", "duration_days", "city", "location_details", "rental_mode", "date_hint",
+  "units_count"];
 // node-pg يعيد أعمدة date كـDate — نوحّدها نصاً YYYY-MM-DD قبل أي منطق أو عرض.
 function salesRowDates(row) {
   if (!row) return row;
@@ -2529,11 +2533,17 @@ function routeInboundTarget(members, e164) {
   return findAllowlistMember(members, e164) ? "internal" : "sales";
 }
 
+// صلاحية دقيقة: sales.review تتيح قراءة طلبات العملاء واعتماد الرد والتسليم للفريق فقط،
+// دون تغيير الدور ودون أي صلاحية إدارية أخرى. (مثال: أبو فايز = viewer + sales.review)
+const SALES_REVIEW_PERMISSION = "sales.review";
+const KNOWN_PERMISSIONS = [SALES_REVIEW_PERMISSION];
+function hasPermission(user, perm) {
+  return !!user && Array.isArray(user.permissions) && user.permissions.includes(perm);
+}
 function requireSalesUser(user, action = false) {
-  const allowed = action ? ["owner", "manager"] : ["owner", "manager", "viewer"];
-  if (!user || !allowed.includes(user.role)) {
-    const e = new Error("ليس لديك صلاحية على طلبات العملاء"); e.statusCode = 403; throw e;
-  }
+  const byRole = action ? ["owner", "manager"] : ["owner", "manager", "viewer"];
+  if (user && (byRole.includes(user.role) || hasPermission(user, SALES_REVIEW_PERMISSION))) return;
+  const e = new Error("ليس لديك صلاحية على طلبات العملاء"); e.statusCode = 403; throw e;
 }
 
 async function handleSalesInbound(client, payload, opts = {}) {
@@ -2587,9 +2597,17 @@ async function handleSalesInbound(client, payload, opts = {}) {
     [lead.id, provider, pmid, text, contentType, mediaUrl, mediaMeta ? JSON.stringify(mediaMeta) : null,
      JSON.stringify(ex), payload.message_timestamp || now.toISOString()]);
 
+  // ── سجل المحادثة: ما قاله الوكيل وما سأله (مواضيع لا نصوص) ──
+  const history = salesEngine.buildHistory((await client.query(
+    "select text, extracted from sales_messages where lead_id=$1 and direction='out_suggested' order by created_at", [lead.id])).rows);
+
   // ── الانتقالات ──
   const L = { ...lead };
-  let ctx = { greeting: ex.greeting && lead.status === "new", priceAsked: ex.price_question, sizeInfoRequested: ex.size_info_request };
+  const prevVal = (f) => String((f === "start_date" ? salesEngine.isoOf(lead[f]) : lead[f]) ?? "");
+  const ack = Object.keys(salesEngine.FIELD_ACK).filter((f) => ex[f] != null && String(ex[f]) !== prevVal(f))
+    .map((f) => salesEngine.FIELD_ACK[f]);
+  let ctx = { greeting: ex.greeting && lead.status === "new", priceAsked: ex.price_question, sizeInfoRequested: ex.size_info_request,
+    contactQuestion: ex.contact_question, contactIssue: ex.contact_issue, ack, history };
   const prevStatus = lead.status;
   const hadReq = JSON.stringify(lead.requested_dimensions || null);
   const dimsKey = (arr) => (arr || []).map((d) => `${d.width}x${d.length}`).join(",");
@@ -2608,7 +2626,11 @@ async function handleSalesInbound(client, payload, opts = {}) {
     }
     if (ex.start_date) L.date_hint = null;
     if (ex.size_unsure) L.size_unsure = true;
-    const extraNotes = [...(ex.extras || []), ex.guest_range ? `العدد تقريباً ${ex.guest_range}` : null].filter(Boolean);
+    // الخدمات تُعتمد فقط لطلب التجهيز المتكامل (كلمة «خيام» في طلب خيمة ليست «خدمة»)
+    if (L.request_type === "full_event" && ex.services) L.requested_services = [...new Set([...(L.requested_services || []), ...ex.services])];
+    const extraNotes = [...(ex.extras || []), ...(L.request_type === "toilets" ? (ex.unit_types || []).map((u) => `النوع: ${u}`) : []),
+      ex.guest_range ? `العدد تقريباً ${ex.guest_range}` : null,
+      ex.contact_issue ? "العميل أفاد أن رقم التواصل الذي وصله ناقص/غلط" : null].filter(Boolean);
     if (extraNotes.length) {
       const cur = new Set(String(L.customer_notes || "").split(" · ").filter(Boolean));
       extraNotes.forEach((n) => cur.add(n));
@@ -2631,8 +2653,14 @@ async function handleSalesInbound(client, payload, opts = {}) {
 
   let reply = null, replyStatus = null, blockReason = null;
   if (L.status === "human_handoff") replyStatus = null;
-  else if (prevStatus === "ready_for_team") reply = "طلبك عند الفريق وبيتواصلون معك قريباً. إذا عندك أي إضافة أرسلها وأضيفها لطلبك 🌿";
-  else reply = salesEngine.composeSalesReply(L, ctx);
+  else if (prevStatus === "ready_for_team") {
+    reply = history.topics.at_team ? "مسجّل عندي، وأضفته لطلبك عند الفريق 👍"
+      : "طلبك عند الفريق وبيتواصلون معك قريباً. إذا عندك أي إضافة أرسلها وأضيفها لطلبك 🌿";
+    replyMeta = { topics: ["at_team"], asked: null };
+  } else {
+    const r = salesEngine.composeSalesReplyEx(L, ctx);
+    reply = r.text || null; replyMeta = { topics: r.topics, asked: r.asked };
+  }
   if (reply) {
     const g = salesEngine.guardSalesReply(reply);
     if (g.ok) replyStatus = "pending"; else { blockReason = g.reason; reply = null; replyStatus = "blocked"; L.status = "human_handoff"; }
@@ -2651,7 +2679,7 @@ async function handleSalesInbound(client, payload, opts = {}) {
        start_date=$12, end_date=$13, duration_days=$14, city=$15, location_details=$16, location_lat=$17, location_lng=$18,
        customer_notes=$19, missing_fields=$20, suggested_reply=$21, suggested_reply_status=$22, reply_block_reason=$23,
        team_summary=$24, customer_name=coalesce(customer_name,$25), last_customer_msg_at=$26,
-       rental_mode=$27, date_hint=$28, updated_at=now()
+       rental_mode=$27, date_hint=$28, units_count=$29, requested_services=$30, updated_at=now()
      where id=$1`,
     [lead.id, L.status, L.request_type || null, L.requested_dimensions ? JSON.stringify(L.requested_dimensions) : null,
      L.suggested_dimensions ? JSON.stringify(L.suggested_dimensions) : null, L.dimensions_confidence || null, !!L.size_unsure,
@@ -2659,9 +2687,12 @@ async function handleSalesInbound(client, payload, opts = {}) {
      L.start_date || null, L.end_date || null, L.duration_days || null, L.city || null, L.location_details || null,
      L.location_lat || null, L.location_lng || null, L.customer_notes || null, L.missing_fields || [],
      reply, replyStatus, blockReason, teamSummary || null, payload.sender_name || null, now.toISOString(),
-     L.rental_mode || null, L.date_hint || null]);
+     L.rental_mode || null, L.date_hint || null, L.units_count || null,
+     L.requested_services && L.requested_services.length ? L.requested_services : null]);
   if (reply) {
-    await client.query(`insert into sales_messages (lead_id, provider, direction, text, content_type) values ($1,'wahet','out_suggested',$2,'text')`, [lead.id, reply]);
+    // extracted للرسائل الصادرة = سجل المواضيع/السؤال — يغذي عدم التكرار في الرسائل التالية
+    await client.query(`insert into sales_messages (lead_id, provider, direction, text, content_type, extracted) values ($1,'wahet','out_suggested',$2,'text',$3::jsonb)`,
+      [lead.id, reply, JSON.stringify(replyMeta || {})]);
   }
   await logAgentAction(client, {
     actorType: "agent", agentRole: "sales", action: "sales.inbound", targetType: "sales_lead", targetId: lead.id,
@@ -3269,5 +3300,5 @@ module.exports.__p17 = {
 // دوال P2.1 (وكيل المبيعات) لأغراض الاختبار فقط
 module.exports.__p21 = {
   handleSalesInbound, listSalesLeads, getSalesLead, approveSalesReply, handoffSalesLead,
-  markStaleSalesLeads, routeInboundTarget, requireSalesUser,
+  markStaleSalesLeads, routeInboundTarget, requireSalesUser, hasPermission, getUserFromToken, KNOWN_PERMISSIONS,
 };

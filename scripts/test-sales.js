@@ -85,7 +85,7 @@ async function main() {
     ok("requested_dimensions لم يُملأ من الاقتراح", cL3.requested_dimensions === null);
 
     console.log("\n— (D) 12×25 غير قياسي ⇒ يشرح ويقترح بلا رفض —");
-    const d = await say(client, PH.D, "أبي خيمة 12×25");
+    const d = await say(client, PH.D, "أبي خيمة أوروبية 12×25");
     console.log("   رد مقترح:", JSON.stringify(d.suggested_reply));
     const dL = await getSalesLead(client, d.lead_id);
     ok("يحفظ طلب العميل حرفياً 12×25", dL.requested_dimensions.raw === "12×25" && dL.requested_dimensions.width === 12);
@@ -107,7 +107,7 @@ async function main() {
     console.log("\n— (F) «كم السعر؟» ⇒ لا سعر ويكمل —");
     const f = await say(client, PH.F, "السلام عليكم كم السعر؟ أبي بيت شعر في جدة");
     console.log("   رد مقترح:", JSON.stringify(f.suggested_reply));
-    ok("يرد بسياسة السعر ويكمل السؤال", /الفريق يجهّز لك عرض السعر/.test(f.suggested_reply) && /كم المساحة/.test(f.suggested_reply));
+    ok("يرد بسياسة السعر ويكمل السؤال", /الفريق يجهّز لك عرض السعر/.test(f.suggested_reply) && /عدد الضيوف|المساحة/.test(f.suggested_reply));
     ok("لا رقم سعر ولا خصم ولا وعد", noPriceLeak(f.suggested_reply));
     ok("فهم النوع والمدينة", !f.missing_fields.includes("request_type") && !f.missing_fields.includes("city"));
 
@@ -138,8 +138,9 @@ async function main() {
     const r5 = await say(client, PH.R, "تمام");
     ok("الاقتراح لا يتكرر في كل رد", !/مبدئياً يناسبك/.test(r5.suggested_reply || ""), JSON.stringify(r5.suggested_reply));
     ok("موعد تقريبي ⇒ يسأل عن التاريخ بالضبط", /بالضبط/.test(r4.suggested_reply || ""), JSON.stringify(r4.suggested_reply));
+    // P2.2: سؤال عن طريقة التواصل ليس طلب موظف — يُرد عليه طبيعياً
     const r6 = await say(client, PH.R, "اكلم ولا ارسل");
-    ok("«اكلم ولا ارسل» ⇒ human_handoff", r6.status === "human_handoff" && r6.suggested_reply === null);
+    ok("«اكلم ولا ارسل» ⇒ رد طبيعي لا human_handoff", r6.status !== "human_handoff" && /تكمل معي هنا/.test(r6.suggested_reply || ""), JSON.stringify(r6.suggested_reply));
 
     console.log("\n— السلامة —");
     ok("لا finance_entry", (await snap()).fin === base.fin);

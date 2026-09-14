@@ -410,3 +410,9 @@ create index if not exists idx_sales_msg_lead on sales_messages(lead_id, created
 -- P2.1: من محادثة عميل حقيقية — إيجار شهري، وموعد تقريبي بلا يوم ("نهاية شهر 10").
 alter table sales_leads add column if not exists rental_mode text;
 alter table sales_leads add column if not exists date_hint text;
+
+-- P2.2: قواعد حسب نوع الطلب + صلاحيات دقيقة
+alter table sales_leads add column if not exists units_count int;            -- دورات المياه: عدد الوحدات
+alter table sales_leads add column if not exists requested_services text[];  -- التجهيز المتكامل: الخدمات المذكورة
+-- صلاحيات إضافية فوق الدور، مثل 'sales.review' (قراءة طلبات العملاء + اعتماد الرد + التسليم فقط)
+alter table app_users add column if not exists permissions text[] not null default '{}';
