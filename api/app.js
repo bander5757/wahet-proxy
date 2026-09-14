@@ -558,6 +558,7 @@ async function getUserFromToken(client, token) {
      from app_sessions s
      join app_users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now() and u.is_active = true
+       and (to_jsonb(s)->>'revoked_at') is null
      limit 1`,
     [sha256(token)]
   );
@@ -595,7 +596,8 @@ async function login(client, payload) {
     `insert into app_sessions (user_id, token_hash, expires_at, persistent) values ($1, $2, now() + $3::interval, $4) returning expires_at`,
     [user.id, sha256(token), expires, persistent]
   );
-  return { token, user: publicUser(user) };
+  // token يُعاد للمعالج فقط ليضعه في كوكي HttpOnly — لا يُرسل في جسم الاستجابة
+  return { token, user: publicUser(user), persistent, expires_at: s.rows[0].expires_at };
 }
 
 async function requireDefaultAccount(client, accountName) {
@@ -2689,15 +2691,17 @@ async function handleSalesInbound(client, payload, opts = {}) {
     const qualified = salesEngine.isQualified(L.missing_fields);
     if (prevStatus === "ready_for_confirmation" && ex.yes && !changed) L.status = "ready_for_team";
     else L.status = qualified ? "ready_for_confirmation" : "qualifying";
-    ctx.nonstandardJustGiven = !!ex.requested_dimensions && L.dimensions_confidence === "nonstandard";
+    // غير قياسي: عند إعطاء المقاس، أو عند معرفة أن الخيمة أوروبية بعد إعطائه
+    ctx.nonstandardJustGiven = L.dimensions_confidence === "nonstandard" && dimsKey(L.suggested_dimensions) !== hadSug;
     ctx.sizingJustDerived = !ex.requested_dimensions && dimsKey(L.suggested_dimensions) !== hadSug
       && ["derived_from_area", "derived_from_guests"].includes(L.dimensions_confidence);
+    ctx.changed = changed;
   }
   // حدّ عدم التقدّم: 12 رسالة عميل على نفس الطلب دون تأهيل ⇒ تحويل لإنسان
   const inCount = (await client.query("select count(*)::int n from sales_messages where lead_id=$1 and direction='in'", [lead.id])).rows[0].n;
   if (inCount >= 12 && ["new", "qualifying"].includes(L.status)) L.status = "human_handoff";
 
-  let reply = null, replyStatus = null, blockReason = null;
+  let reply = null, replyStatus = null, blockReason = null, replyMeta = null;
   if (L.status === "human_handoff") replyStatus = null;
   else if (prevStatus === "ready_for_team") {
     reply = history.topics.at_team ? "مسجّل عندي، وأضفته لطلبك عند الفريق 👍"

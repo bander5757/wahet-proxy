@@ -1868,7 +1868,7 @@ async function loginWithValues(identifier, code, remember) {
     try {
       localStorage.setItem('wk_current_user', JSON.stringify(currentUser));
       localStorage.removeItem('wk_login_skipped');
-    }
+    } catch(e) {}
     loginRequired = true;
     renderUserStatus();
     applyPermissions();
@@ -5864,7 +5864,7 @@ function renderSales() {
       </div>
       <div style="font-size:12px;margin-top:8px"><span style="color:#9a9898">آخر رسالة:</span> ${htmlEscape(l.last_message || '—')}</div>
       ${l.suggested_reply ? `<div style="margin-top:8px;padding:8px;border:0.5px dashed #2e3244;border-radius:8px;font-size:12px;white-space:pre-wrap">
-        <div style="font-size:10px;color:#9a9898;margin-bottom:4px">الرد المقترح (${l.suggested_reply_status === 'approved' ? 'معتمد — لم يُرسل' : 'بانتظار الاعتماد'})</div>${htmlEscape(l.suggested_reply)}</div>` : ''}
+        <div style="font-size:10px;color:#9a9898;margin-bottom:4px">الرد المقترح (${({ approved:'معتمد — لم يُرسل', sent:'✅ أُرسل', send_failed:'❌ فشل الإرسال', blocked:'محجوب' })[l.suggested_reply_status] || 'بانتظار الاعتماد'})</div>${htmlEscape(l.suggested_reply)}</div>` : ''}
       ${l.reply_block_reason ? `<div style="font-size:11px;color:#E24B4A;margin-top:6px">حُجب الرد: ${htmlEscape(l.reply_block_reason)}</div>` : ''}
       ${l.team_summary ? `<details style="margin-top:8px"><summary style="font-size:12px;cursor:pointer">ملخص الفريق</summary>
         <pre style="white-space:pre-wrap;font-size:12px;margin-top:6px">${htmlEscape(l.team_summary)}</pre></details>` : ''}
