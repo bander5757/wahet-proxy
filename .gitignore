@@ -3,3 +3,6 @@
 node_modules
 .DS_Store
 __pycache__/
+
+# ملف رسائل Peach المؤقت للمزامنة (لا يُرفع)
+.peach-sync/

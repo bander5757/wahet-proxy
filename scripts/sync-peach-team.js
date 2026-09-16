@@ -7,7 +7,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const INBOX_FILE = path.join(os.homedir(), ".wahet-sync", "inbound.json");
+// داخل المشروع (مُتجاهَل في git): الكتابة خارج مجلد العمل تطلب موافقة يدوية في كل تشغيل مجدول
+const INBOX_FILE = path.join(__dirname, "..", ".peach-sync", "inbound.json");
 const ENV_FILE = path.join(os.homedir(), ".wahet-staging.env");
 const BASE = "https://wahet-proxy-staging.vercel.app/api/app";
 const BUSINESS = "552039917";
