@@ -2983,6 +2983,40 @@ async function recordSalesSendResult(client, payload, user) {
   return { outbound_id: ob.id, status: ok ? "sent" : "failed", error };
 }
 
+/* مؤشر مزامنة Peach عبر الخادم — حتى يعمل التشغيل السحابي بمفتاح الوارد وحده،
+   بلا أي بيانات اعتماد لقاعدة البيانات خارج جهاز المالك. staging فقط عملياً. */
+const PEACH_CURSOR_KEY = "peach_team_sync";
+const PEACH_OVERLAP_MS = 10 * 60 * 1000;
+async function getPeachCursor(client) {
+  const cur = (await client.query("select value from app_settings where key=$1", [PEACH_CURSOR_KEY])).rows[0]?.value || {};
+  const nextFrom = cur.last_created_at
+    ? new Date(new Date(cur.last_created_at).getTime() - PEACH_OVERLAP_MS).toISOString()
+    : new Date(Date.now() - 7 * 864e5).toISOString();
+  return { next_from: nextFrom, last_created_at: cur.last_created_at || null, last_id: cur.last_id || null,
+    recent_ids: Array.isArray(cur.recent_ids) ? cur.recent_ids.slice(-300) : [], runs: cur.runs || 0 };
+}
+async function updatePeachCursor(client, payload) {
+  const cur = (await client.query("select value from app_settings where key=$1", [PEACH_CURSOR_KEY])).rows[0]?.value || { runs: 0 };
+  if (payload.last_created_at) cur.last_created_at = String(payload.last_created_at);
+  if (payload.last_id != null) cur.last_id = payload.last_id;
+  if (Array.isArray(payload.recent_ids)) cur.recent_ids = payload.recent_ids.map(String).slice(-300);
+  cur.runs = (cur.runs || 0) + 1;
+  cur.last_run_at = new Date().toISOString();
+  cur.last_actor = String(payload.actor || "cloud").slice(0, 40);
+  await client.query(`insert into app_settings (key,value) values ($1,$2::jsonb)
+    on conflict (key) do update set value=excluded.value`, [PEACH_CURSOR_KEY, JSON.stringify(cur)]);
+  // سجل التدقيق يُكتب هنا (الخادم) لا في العميل السحابي
+  const counts = payload.counts && typeof payload.counts === "object" ? payload.counts : {};
+  const skipped = payload.skipped && typeof payload.skipped === "object" ? payload.skipped : {};
+  await client.query(
+    `insert into agent_actions (actor_type, actor_name, agent_role, action, target_type, summary, after_state, status)
+     values ('agent',$1,'accounting','intake.peach_sync','app_settings',$2,$3::jsonb,$4)`,
+    [cur.last_actor, `مزامنة Peach (${cur.last_actor}): ${Number(payload.processed || 0)} مُمرَّرة ${JSON.stringify(counts)}`,
+     JSON.stringify({ counts, skipped, cursor: { last_created_at: cur.last_created_at, last_id: cur.last_id } }),
+     payload.stopped_at ? "failed" : "done"]);
+  return { last_created_at: cur.last_created_at || null, last_id: cur.last_id || null, runs: cur.runs };
+}
+
 async function markStaleSalesLeads(client, now = new Date(), days = 7) {
   const r = await client.query(
     `update sales_leads set status='stale', updated_at=now()
@@ -3119,6 +3153,14 @@ module.exports = async function handler(req, res) {
     }
 
     // WhatsApp Intake Review (M2) — شاشة الصندوق والمراجعة البشرية (جلسة مستخدم)
+    // مؤشر مزامنة Peach (مفتاح الوارد نفسه) — قراءة وتحديث فقط، لا يلمس أي رسالة
+    if (path === "/intake/peach-cursor" && (req.method === "GET" || req.method === "POST")) {
+      const secret = process.env.INTAKE_SECRET;
+      if (!secret) return res.status(503).json({ ok: false, error: "INTAKE_SECRET غير مُعد على الخادم" });
+      if (String(req.headers["x-intake-secret"] || "") !== secret) return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
+      const data = req.method === "GET" ? await getPeachCursor(client) : await updatePeachCursor(client, req.body || {});
+      return res.status(200).json({ ok: true, data });
+    }
     if (req.method === "GET" && path === "/intake") {
       requireIntakeApprover(user); // M2.5: القراءة أيضاً محصورة بـ owner/accountant
       return res.status(200).json({ ok: true, data: await listIntake(client, { status: query.status }) });
@@ -3575,6 +3617,7 @@ module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
   changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
 };
+module.exports.__cloudsync = { getPeachCursor, updatePeachCursor };
 module.exports.__p23 = {
   approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
 };
