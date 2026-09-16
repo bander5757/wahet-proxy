@@ -823,7 +823,30 @@
       تذكرني على هذا الجهاز
     </label>
     <button class="btn-primary" style="width:100%;padding:11px" onclick="loginUser()">دخول</button>
+    <button id="change-pw-btn" class="btn-secondary" style="width:100%;padding:10px;margin-top:8px;display:none" onclick="openChangePassword()">تغيير كلمة المرور</button>
     <button class="btn-secondary" style="width:100%;padding:10px;margin-top:8px" onclick="logoutUser()">تسجيل خروج</button>
+  </div>
+</div>
+
+<!-- تغيير كلمة المرور: لكل مستخدم كلمة مروره هو فقط -->
+<div id="change-password-modal" class="modal-overlay" style="display:none" onclick="closeChangePassword()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="flex-between mb-12">
+      <div>
+        <div style="font-size:15px;font-weight:600">تغيير كلمة المرور</div>
+        <div id="cp-who" style="font-size:11px;color:#9a9898;margin-top:2px"></div>
+      </div>
+      <button class="btn-secondary" onclick="closeChangePassword()">إغلاق</button>
+    </div>
+    <div id="cp-forced" style="display:none;font-size:12px;color:#EF9F27;margin-bottom:10px">هذه كلمة مرور مؤقتة — الرجاء تغييرها الآن.</div>
+    <div style="margin-bottom:8px"><div class="label">كلمة المرور الحالية</div>
+      <input id="cp-current" type="password" autocomplete="current-password" placeholder="الحالية"></div>
+    <div style="margin-bottom:8px"><div class="label">كلمة المرور الجديدة</div>
+      <input id="cp-new" type="password" autocomplete="new-password" placeholder="8 خانات على الأقل، حروف وأرقام"></div>
+    <div style="margin-bottom:10px"><div class="label">تأكيد كلمة المرور الجديدة</div>
+      <input id="cp-confirm" type="password" autocomplete="new-password" placeholder="أعد كتابتها"></div>
+    <div id="cp-msg" style="font-size:12px;margin-bottom:8px"></div>
+    <button class="btn-primary" style="width:100%;padding:11px" onclick="submitChangePassword()">حفظ</button>
   </div>
 </div>
 
@@ -1875,11 +1898,50 @@ async function loginWithValues(identifier, code, remember) {
     hideLoginScreen();
     closeLogin();
     showMsg('✅ تم تسجيل الدخول: ' + currentUser.name);
+    refreshPasswordUi();
     return true;
   } catch(e) {
     alert(e.message);
     return false;
   }
+}
+/* ─── تغيير كلمة المرور (المستخدم نفسه فقط) ─── */
+function openChangePassword(forced) {
+  if (!currentUser) { alert('سجّل الدخول أولاً'); return; }
+  const m = document.getElementById('change-password-modal');
+  if (!m) return;
+  document.getElementById('cp-who').textContent = 'حساب: ' + (currentUser.name || '');
+  document.getElementById('cp-forced').style.display = forced ? '' : 'none';
+  ['cp-current','cp-new','cp-confirm'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('cp-msg').textContent = '';
+  m.style.display = 'flex';
+  closeLogin();
+}
+function closeChangePassword() {
+  const m = document.getElementById('change-password-modal');
+  if (m) m.style.display = 'none';
+}
+async function submitChangePassword() {
+  const msg = document.getElementById('cp-msg');
+  const current = document.getElementById('cp-current').value;
+  const next = document.getElementById('cp-new').value;
+  const confirmPw = document.getElementById('cp-confirm').value;
+  if (!current || !next) { msg.style.color = '#E24B4A'; msg.textContent = 'أدخل كلمة المرور الحالية والجديدة'; return; }
+  if (next !== confirmPw) { msg.style.color = '#E24B4A'; msg.textContent = 'تأكيد كلمة المرور لا يطابق'; return; }
+  try {
+    const res = await apiRequest('/auth/change-password', { method: 'POST',
+      body: JSON.stringify({ current_password: current, new_password: next, confirm_password: confirmPw }) });
+    if (currentUser) currentUser.must_change_password = false;
+    msg.style.color = '#5DCAA5';
+    msg.textContent = '✅ تم التغيير' + (res.data?.other_sessions_revoked ? ` — أُغلقت ${res.data.other_sessions_revoked} جلسة أخرى` : '');
+    setTimeout(closeChangePassword, 1200);
+    showMsg('✅ تم تغيير كلمة المرور');
+  } catch(e) { msg.style.color = '#E24B4A'; msg.textContent = e.message; }
+}
+function refreshPasswordUi() {
+  const btn = document.getElementById('change-pw-btn');
+  if (btn) btn.style.display = currentUser && apiOnline ? '' : 'none';
+  if (currentUser && currentUser.must_change_password) openChangePassword(true);
 }
 function continueLocalPreview() {
   currentUser = { name: 'ابو فايز', role: 'viewer' };
@@ -6236,6 +6298,7 @@ async function boot() {
   render();
   applyPermissions();
   if (shouldShowLoginScreen()) showLoginScreen(); else hideLoginScreen();
+  refreshPasswordUi();
   await hydrateConfig();
   if (hasConfig()) {
     showMsg('✅ إعدادات دفترة جاهزة. ستعمل المزامنة تلقائياً كل 10 دقائق');

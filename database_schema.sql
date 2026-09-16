@@ -450,3 +450,6 @@ create unique index if not exists idx_sales_outbound_one_open on sales_outbound(
 -- جلسات: «تذكرني» + إلغاء من الخادم (logout)
 alter table app_sessions add column if not exists persistent boolean not null default false;
 alter table app_sessions add column if not exists revoked_at timestamptz;
+
+-- إلزام تغيير كلمة المرور بعد إعادة التعيين (staging)
+alter table app_users add column if not exists must_change_password boolean not null default false;

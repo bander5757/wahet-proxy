@@ -547,14 +547,54 @@ function publicUser(row) {
     role: row.role,
     // صلاحيات دقيقة إضافية فوق الدور (مثل sales.review) — لا تمنح صلاحيات إدارية عامة
     permissions: Array.isArray(row.permissions) ? row.permissions : [],
+    must_change_password: row.must_change_password === true || row.must_change_password === "true",
   };
+}
+
+/* تغيير المستخدم لكلمة مروره بنفسه — لا يغيّر أحد كلمة مرور غيره من هنا */
+const MIN_PASSWORD_LEN = 8;
+const WEAK_PASSWORDS = ["password", "123456", "12345678", "qwerty", "111111", "admin", "wahet", "waha"];
+function validateNewPassword(pw, user) {
+  const p = String(pw || "");
+  if (p.length < MIN_PASSWORD_LEN) { const e = new Error(`كلمة المرور يجب ألا تقل عن ${MIN_PASSWORD_LEN} خانات`); e.statusCode = 400; throw e; }
+  if (!/[A-Za-z؀-ۿ]/.test(p) || !/\d/.test(p)) { const e = new Error("كلمة المرور يجب أن تحتوي حروفاً وأرقاماً"); e.statusCode = 400; throw e; }
+  const low = p.toLowerCase();
+  if (WEAK_PASSWORDS.some((w) => low.includes(w))) { const e = new Error("كلمة المرور ضعيفة/شائعة — اختر غيرها"); e.statusCode = 400; throw e; }
+  const phone = String(user.phone || "").replace(/\D/g, "");
+  if (phone && phone.length >= 6 && p.replace(/\D/g, "").includes(phone.slice(-9))) {
+    const e = new Error("لا تستخدم رقم جوالك في كلمة المرور"); e.statusCode = 400; throw e;
+  }
+  return p;
+}
+async function changeOwnPassword(client, payload, user, currentToken) {
+  if (!user) { const e = new Error("يجب تسجيل الدخول"); e.statusCode = 401; throw e; }
+  const current = String(payload.current_password || "");
+  const next = String(payload.new_password || "");
+  const confirm = String(payload.confirm_password || "");
+  if (!current || !next) { const e = new Error("كلمة المرور الحالية والجديدة مطلوبة"); e.statusCode = 400; throw e; }
+  if (next !== confirm) { const e = new Error("تأكيد كلمة المرور لا يطابق"); e.statusCode = 400; throw e; }
+  const row = (await client.query("select login_code_hash from app_users where id=$1 and is_active", [user.id])).rows[0];
+  if (!row || !verifyLoginCode(current, row.login_code_hash).ok) {
+    const e = new Error("كلمة المرور الحالية غير صحيحة"); e.statusCode = 401; throw e;
+  }
+  if (verifyLoginCode(next, row.login_code_hash).ok) { const e = new Error("كلمة المرور الجديدة مطابقة للحالية"); e.statusCode = 400; throw e; }
+  validateNewPassword(next, user);
+  await client.query("update app_users set login_code_hash=$2, must_change_password=false where id=$1", [user.id, hashLoginCode(next)]);
+  // الجلسة الحالية تبقى؛ أي جلسة أخرى لنفس المستخدم تُلغى (تغيير كلمة المرور يُخرج بقية الأجهزة)
+  const others = await client.query(
+    "update app_sessions set revoked_at=now() where user_id=$1 and revoked_at is null and token_hash <> $2", [user.id, sha256(currentToken || "")]);
+  // لا تُسجَّل كلمة المرور ولا التجزئة في أي مكان
+  await logAgentAction(client, { actorType: "human", actorRef: user.id, actorName: user.name, action: "auth.password_changed",
+    targetType: "app_users", targetId: user.id, summary: `غيّر كلمة مروره بنفسه — أُلغيت ${others.rowCount} جلسة أخرى` });
+  return { ok: true, other_sessions_revoked: others.rowCount, must_change_password: false };
 }
 
 async function getUserFromToken(client, token) {
   if (!token) return null;
   // to_jsonb(u)->'permissions' يتحمّل غياب العمود (قاعدة لم تُطبَّق عليها الهجرة بعد)
   const result = await client.query(
-    `select u.id, u.name, u.phone, u.email, u.role, to_jsonb(u)->'permissions' as permissions
+    `select u.id, u.name, u.phone, u.email, u.role, to_jsonb(u)->'permissions' as permissions,
+            to_jsonb(u)->>'must_change_password' as must_change_password
      from app_sessions s
      join app_users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now() and u.is_active = true
@@ -574,7 +614,8 @@ async function login(client, payload) {
     throw err;
   }
   const result = await client.query(
-    `select u.id, u.name, u.phone, u.email, u.role, u.login_code_hash, to_jsonb(u)->'permissions' as permissions
+    `select u.id, u.name, u.phone, u.email, u.role, u.login_code_hash, to_jsonb(u)->'permissions' as permissions,
+            to_jsonb(u)->>'must_change_password' as must_change_password
      from app_users u
      where u.is_active = true and (u.email = $1 or u.phone = $1 or u.name = $1)
      limit 1`,
@@ -3058,6 +3099,9 @@ module.exports = async function handler(req, res) {
       res.setHeader("Set-Cookie", clearSessionCookie());
       return res.status(200).json({ ok: true, data: { revoked } });
     }
+    if (req.method === "POST" && path === "/auth/change-password") {
+      return res.status(200).json({ ok: true, data: await changeOwnPassword(client, req.body || {}, user, token) });
+    }
     if (req.method === "GET" && path === "/auth/me") {
       if (!user) return res.status(401).json({ ok: false, error: "لا توجد جلسة صالحة" });
       return res.status(200).json({ ok: true, data: { user } });
@@ -3529,6 +3573,7 @@ module.exports.__p21 = {
 };
 module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
+  changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
 };
 module.exports.__p23 = {
   approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
