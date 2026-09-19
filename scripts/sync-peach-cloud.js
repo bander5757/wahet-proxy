@@ -7,6 +7,7 @@ const path = require("path");
 
 const BASE = process.env.WAHET_BASE || "https://wahet-proxy-staging.vercel.app/api/app";
 const SECRET = process.env.WAHET_INTAKE_SECRET || "";
+const SYNC_TOKEN = process.env.WAHET_SYNC_TOKEN || "";   // رمز مزامنة مستقل (بديل المفتاح الرئيسي)
 const INBOX_FILE = path.join(__dirname, "..", ".peach-sync", "inbound.json");
 const BUSINESS = "552039917";
 // أرقام الفريق الموثوقة (نسخة سحابية: لا وصول لقاعدة البيانات)
@@ -20,7 +21,9 @@ function digits(s) {
   return d;
 }
 const isRetryable = (http) => http === 0 || http >= 500;
-const headers = () => ({ "Content-Type": "application/json", "x-intake-secret": SECRET });
+const headers = () => (SECRET
+  ? { "Content-Type": "application/json", "x-intake-secret": SECRET }
+  : { "Content-Type": "application/json", "x-sync-token": SYNC_TOKEN });
 
 async function api(p, init) {
   const r = await fetch(BASE + p, { ...init, headers: headers() });
@@ -54,7 +57,7 @@ function payloadFor(m, name) {
 }
 
 async function main() {
-  if (!SECRET) { console.log(JSON.stringify({ error: "WAHET_INTAKE_SECRET غير متوفر" })); process.exit(2); }
+  if (!SECRET && !SYNC_TOKEN) { console.log(JSON.stringify({ error: "لا يوجد WAHET_INTAKE_SECRET ولا WAHET_SYNC_TOKEN" })); process.exit(2); }
   const cur = await api("/intake/peach-cursor", { method: "GET" });
   if (cur.http !== 200) { console.log(JSON.stringify({ error: "cursor_failed", http: cur.http })); process.exit(1); }
   if (process.argv.includes("--cursor")) { console.log(JSON.stringify({ next_from: cur.data.next_from, last_id: cur.data.last_id, runs: cur.data.runs })); return; }

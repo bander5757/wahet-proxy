@@ -2985,6 +2985,24 @@ async function recordSalesSendResult(client, payload, user) {
 
 /* مؤشر مزامنة Peach عبر الخادم — حتى يعمل التشغيل السحابي بمفتاح الوارد وحده،
    بلا أي بيانات اعتماد لقاعدة البيانات خارج جهاز المالك. staging فقط عملياً. */
+/* رمز مزامنة مستقل (staging): صلاحيته إدخال رسائل الوارد وتحديث مؤشر Peach فقط.
+   يُخزَّن كبصمة sha256 في app_settings، ويُبطَل بحذف الصف أو بجعل active=false.
+   يسمح بتشغيل المزامنة من بيئة سحابية دون وضع مفتاح الوارد الرئيسي فيها. */
+async function checkIntakeAuth(client, req) {
+  const secret = process.env.INTAKE_SECRET;
+  const header = String(req.headers["x-intake-secret"] || "");
+  if (secret && header && header === secret) return { ok: true, via: "intake_secret" };
+  const token = String(req.headers["x-sync-token"] || "");
+  if (token) {
+    const stored = (await client.query("select value from app_settings where key='sync_tokens'")).rows[0]?.value;
+    const list = Array.isArray(stored?.tokens) ? stored.tokens : [];
+    const hash = sha256(token);
+    const hit = list.find((t) => t && t.hash === hash && t.active !== false && t.scope === "intake_sync");
+    if (hit) return { ok: true, via: "sync_token:" + String(hit.label || "unnamed").slice(0, 40) };
+  }
+  return { ok: false };
+}
+
 const PEACH_CURSOR_KEY = "peach_team_sync";
 const PEACH_OVERLAP_MS = 10 * 60 * 1000;
 async function getPeachCursor(client) {
@@ -3143,11 +3161,8 @@ module.exports = async function handler(req, res) {
 
     // WhatsApp Intake (M1): استقبال آلي عبر مفتاح خدمة (machine-to-machine)
     if (req.method === "POST" && path === "/intake/whatsapp") {
-      const secret = process.env.INTAKE_SECRET;
-      if (!secret) return res.status(503).json({ ok: false, error: "INTAKE_SECRET غير مُعد على الخادم" });
-      if (String(req.headers["x-intake-secret"] || "") !== secret) {
-        return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
-      }
+      const auth = await checkIntakeAuth(client, req);
+      if (!auth.ok) return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
       const data = await createWhatsappIntake(client, req.body || {});
       return res.status(data.stored ? 201 : 200).json({ ok: true, data });
     }
@@ -3155,9 +3170,8 @@ module.exports = async function handler(req, res) {
     // WhatsApp Intake Review (M2) — شاشة الصندوق والمراجعة البشرية (جلسة مستخدم)
     // مؤشر مزامنة Peach (مفتاح الوارد نفسه) — قراءة وتحديث فقط، لا يلمس أي رسالة
     if (path === "/intake/peach-cursor" && (req.method === "GET" || req.method === "POST")) {
-      const secret = process.env.INTAKE_SECRET;
-      if (!secret) return res.status(503).json({ ok: false, error: "INTAKE_SECRET غير مُعد على الخادم" });
-      if (String(req.headers["x-intake-secret"] || "") !== secret) return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
+      const auth = await checkIntakeAuth(client, req);
+      if (!auth.ok) return res.status(401).json({ ok: false, error: "مفتاح الوارد غير صحيح" });
       const data = req.method === "GET" ? await getPeachCursor(client) : await updatePeachCursor(client, req.body || {});
       return res.status(200).json({ ok: true, data });
     }
@@ -3617,7 +3631,7 @@ module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
   changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
 };
-module.exports.__cloudsync = { getPeachCursor, updatePeachCursor };
+module.exports.__cloudsync = { getPeachCursor, updatePeachCursor, checkIntakeAuth };
 module.exports.__p23 = {
   approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
 };

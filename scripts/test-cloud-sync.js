@@ -1,7 +1,8 @@
 // اختبارات المزامنة السحابية: مؤشر عبر الخادم + منطق الفلترة بلا قاعدة بيانات. staging فقط.
 const { Pool } = require("pg");
 const app = require("../api/app");
-const { getPeachCursor, updatePeachCursor } = app.__cloudsync;
+const { getPeachCursor, updatePeachCursor, checkIntakeAuth } = app.__cloudsync;
+const crypto = require("crypto");
 const cloud = require("./sync-peach-cloud");
 
 let passed = 0, failed = 0;
@@ -47,6 +48,34 @@ async function main() {
     const audit2 = (await client.query("select status from agent_actions where action='intake.peach_sync' order by created_at desc limit 1")).rows[0];
     ok("توقف بسبب فشل ⇒ الحالة failed", audit2.status === "failed" && up2.runs === up.runs + 1);
     ok("لا finance_entry", (await client.query("select count(*)::int n from finance_entries")).rows[0].n === 0);
+
+    console.log("\n— رمز المزامنة المستقل —");
+    const prevTok = (await client.query("select value from app_settings where key='sync_tokens'")).rows[0]?.value || null;
+    const good = "tk_" + crypto.randomBytes(12).toString("hex");
+    const revoked = "tk_" + crypto.randomBytes(12).toString("hex");
+    const wrongScope = "tk_" + crypto.randomBytes(12).toString("hex");
+    const h = (t) => crypto.createHash("sha256").update(t).digest("hex");
+    await client.query(`insert into app_settings (key,value) values ('sync_tokens',$1::jsonb)
+      on conflict (key) do update set value=excluded.value`, [JSON.stringify({ tokens: [
+        { hash: h(good), scope: "intake_sync", label: "test-good", active: true },
+        { hash: h(revoked), scope: "intake_sync", label: "test-revoked", active: false },
+        { hash: h(wrongScope), scope: "something_else", label: "test-scope", active: true }] })]);
+    const req = (hdrs) => ({ headers: hdrs });
+    const savedSecret = process.env.INTAKE_SECRET;
+    process.env.INTAKE_SECRET = "the-real-secret";
+    ok("مفتاح الوارد الرئيسي يعمل", (await checkIntakeAuth(client, req({ "x-intake-secret": "the-real-secret" }))).ok === true);
+    ok("مفتاح خاطئ يُرفض", (await checkIntakeAuth(client, req({ "x-intake-secret": "nope" }))).ok === false);
+    const viaTok = await checkIntakeAuth(client, req({ "x-sync-token": good }));
+    ok("رمز المزامنة الصحيح يعمل ويُسمّى في النتيجة", viaTok.ok === true && viaTok.via === "sync_token:test-good");
+    ok("رمز مُبطَل يُرفض", (await checkIntakeAuth(client, req({ "x-sync-token": revoked }))).ok === false);
+    ok("رمز بنطاق مختلف يُرفض", (await checkIntakeAuth(client, req({ "x-sync-token": wrongScope }))).ok === false);
+    ok("رمز عشوائي يُرفض", (await checkIntakeAuth(client, req({ "x-sync-token": "tk_deadbeef" }))).ok === false);
+    ok("بلا أي ترويسة يُرفض", (await checkIntakeAuth(client, req({}))).ok === false);
+    ok("الرمز يُخزَّن كبصمة لا كنص", !JSON.stringify((await client.query("select value from app_settings where key='sync_tokens'")).rows[0].value).includes(good));
+    if (savedSecret === undefined) delete process.env.INTAKE_SECRET; else process.env.INTAKE_SECRET = savedSecret;
+    if (prevTok) await client.query("update app_settings set value=$1::jsonb where key='sync_tokens'", [JSON.stringify(prevTok)]);
+    else await client.query("delete from app_settings where key='sync_tokens'");
+
   } finally {
     if (before) await client.query("update app_settings set value=$1::jsonb where key='peach_team_sync'", [JSON.stringify(before)]);
     else await client.query("delete from app_settings where key='peach_team_sync'");
