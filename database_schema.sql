@@ -453,3 +453,7 @@ alter table app_sessions add column if not exists revoked_at timestamptz;
 
 -- إلزام تغيير كلمة المرور بعد إعادة التعيين (staging)
 alter table app_users add column if not exists must_change_password boolean not null default false;
+
+-- ربط الحسابات البنكية بالآيبان (لتحديد من أي حساب وإلى أي حساب من الإيصال)
+alter table bank_accounts add column if not exists iban text;
+alter table bank_accounts add column if not exists iban_last4 text;

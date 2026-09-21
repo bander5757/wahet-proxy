@@ -5786,8 +5786,11 @@ function renderIntake() {
         <div>التصنيف: ${htmlEscape(it.classification || '—')}</div>
         <div>المبلغ: ${it.amount == null ? '—' : money(it.amount)}</div>
         <div>الثقة: ${conf}</div>
-        <div>من حساب: ${htmlEscape(it.source_account_name || '—')}</div>
-        <div>إلى حساب: ${htmlEscape(it.destination_account_name || '—')}</div>
+        <div>من حساب: ${htmlEscape(it.source_account_name || (it.parsed_data?.from_iban_last4 ? 'حساب ينتهي بـ' + it.parsed_data.from_iban_last4 : '—'))}</div>
+        <div>إلى حساب: ${htmlEscape(it.destination_account_name || (it.parsed_data?.to_iban_last4 ? 'حساب ينتهي بـ' + it.parsed_data.to_iban_last4 : '—'))}</div>
+        ${it.parsed_data?.counterparty ? `<div>المستفيد: ${htmlEscape(it.parsed_data.counterparty)}</div>` : ''}
+        ${it.parsed_data?.bank_from ? `<div>البنك: ${htmlEscape(it.parsed_data.bank_from)}</div>` : ''}
+        ${it.transaction_reference ? `<div>مرجع العملية: ${htmlEscape(String(it.transaction_reference))}</div>` : ''}
         <div>حقول ناقصة: ${htmlEscape(miss)}</div>
         ${it.reviewed_by_name ? `<div>راجعها: ${htmlEscape(it.reviewed_by_name)}</div>` : ''}
         ${it.rejection_reason ? `<div style="color:#E24B4A">سبب الرفض: ${htmlEscape(it.rejection_reason)}</div>` : ''}

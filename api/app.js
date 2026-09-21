@@ -2174,13 +2174,20 @@ async function createWhatsappIntake(client, payload, opts = {}) {
 /* ─── P1.7: جلب المرفق واستخراج بياناته ─── */
 
 // مضيفات المرفقات المسموحة حصراً (لا fetch عام ⇒ لا SSRF).
+// مصادر المرفقات المسموحة (Peach يستضيف الملفات على GCS بروابط موقّعة منذ 09/2026)
 const ATTACHMENT_HOSTS = new Set(["app.trypeach.ai"]);
+const ATTACHMENT_HOST_PATHS = { "storage.googleapis.com": ["/peach_user_uploads/"] };
+function attachmentHostAllowed(u) {
+  if (ATTACHMENT_HOSTS.has(u.hostname)) return true;
+  const prefixes = ATTACHMENT_HOST_PATHS[u.hostname];
+  return Array.isArray(prefixes) && prefixes.some((pre) => u.pathname.startsWith(pre));
+}
 
 // يجلب المرفق ويحسب hash. لا يرمي أبداً: الفشل يعيد null فلا تُفقد الرسالة.
 async function fetchAttachment(url, timeoutMs = 12000) {
   let u;
   try { u = new URL(String(url || "")); } catch { return null; }
-  if (!["http:", "https:"].includes(u.protocol) || !ATTACHMENT_HOSTS.has(u.hostname)) return null;
+  if (!["http:", "https:"].includes(u.protocol) || !attachmentHostAllowed(u)) return null;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
@@ -2214,29 +2221,70 @@ function nearMatch(text, labelRe, valueRe, window = 60) {
 
 // استخراج حقول إيصال/فاتورة من نص مستخرج. ما لا يُوجَد يبقى null (لا تخمين).
 function extractReceiptFields(text) {
-  const t = String(text || "");
+  const t = String(text || "").replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
   const num = (s) => { const n = Number(String(s).replace(/,/g, "")); return Number.isFinite(n) && n > 0 ? n : null; };
+  // رقم كامل لا مجزّأ: لا يبدأ ولا ينتهي داخل سلسلة أرقام (كان "2000" يُقرأ "200" ثم "0")
+  const MONEY = "(?<![\\d.,])(\\d[\\d,]*(?:\\.\\d{1,2})?)(?![\\d])";
   const amount = num(
-    nearMatch(t, /Total\s*Amount|المبلغ\s*الإجمالي|الإجمالي/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
-    || nearMatch(t, /Amount|المبلغ/i, /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/)
+    nearMatch(t, /Total\s*Amount|المبلغ\s*الإجمالي|الإجمالي/i, new RegExp(MONEY))
+    || nearMatch(t, /SAR|ر\.?\s?س|ريال/i, new RegExp(MONEY), 25)
+    || nearMatch(t, /Amount|المبلغ/i, new RegExp(MONEY))
   );
-  // IBAN قد يُكتب متصلاً أو بمجموعات مفصولة بمسافات (SA## #### ####…)
-  const ibanM = t.match(/\bSA\s?[0-9]{2}(?:\s?[0-9A-Z]){20}(?![0-9])/);
-  // المرجع: نبحث بعد إزالة الـIBAN حتى لا تُلتقط أرقامه كمرجع. بعض القوالب (مثل «بين حساباتي») لا تحوي مرجعاً أصلاً ⇒ null بلا تخمين
-  const tNoIban = ibanM ? t.replace(ibanM[0], " ") : t;
+  // IBAN سعودي: قد يلتصق بنص قبله في PDF لذا بلا حدّ كلمة. والمقنّع يُلتقط بآخر 4 أرقام.
+  // آيبان سعودي: SA + رقمان + 20 خانة (قد تحوي حروفاً وقد تُكتب بمسافات)، وقد يلتصق بنص قبله
+  const ibansFull = [...t.matchAll(/SA[0-9]{2}(?:\s?[0-9A-Z]){20}/g)]
+    .map((m) => ({ iban: m[0].replace(/\s/g, ""), raw: m[0], at: m.index, masked: false }));
+  const ibansMasked = [...t.matchAll(/SA[\s*]{4,}(?:[\d*]{2,6}[\s*]*){0,6}?(\d{4})(?![\d])/g)]
+    .map((m) => ({ iban: null, last4: m[1], at: m.index, masked: true }));
+  // في إيصالات RTL تأتي التسمية بعد القيمة (…SA…To / …Al Rajhi BankFrom)
+  const sideOf = (entry, len) => {
+    const after = t.slice(entry.at + len, entry.at + len + 14);
+    const before = t.slice(Math.max(0, entry.at - 14), entry.at);
+    // التسمية قبل القيمة (إيصال إنجليزي: From SA…) لها الأولوية على ما بعدها (إيصال RTL: …SA…To)
+    if (/(From|من)\s*$/.test(before)) return "from";
+    if (/(To|الى|إلى)\s*$/.test(before)) return "to";
+    if (/^\s*To\b|^\s*الى|^\s*إلى/.test(after)) return "to";
+    if (/^\s*From\b|^\s*من/.test(after)) return "from";
+    return null;
+  };
+  let fromIban = null, toIban = null, fromLast4 = null, toLast4 = null;
+  for (const e of ibansFull) {
+    const side = sideOf(e, (e.raw || e.iban).length);
+    if (side === "to" && !toIban) { toIban = e.iban; toLast4 = e.iban.slice(-4); }
+    else if (side === "from" && !fromIban) { fromIban = e.iban; fromLast4 = e.iban.slice(-4); }
+  }
+  for (const e of ibansMasked) {
+    const side = sideOf(e, t.slice(e.at).match(/^SA[\s*\d]*\d{4}/)?.[0]?.length || 0);
+    if (side === "from" && !fromLast4) fromLast4 = e.last4;
+    else if (side === "to" && !toLast4) toLast4 = e.last4;
+  }
+  // إن لم تُعرف الجهة: الكامل غير المنسوب غالباً المستفيد، والمقنّع غالباً حساب المرسِل
+  if (!toIban && ibansFull.length && !fromIban) { toIban = ibansFull[0].iban; toLast4 = toIban.slice(-4); }
+  if (!fromLast4 && ibansMasked.length) fromLast4 = ibansMasked[0].last4;
+
+  const tNoIban = t.replace(/SA[0-9]{2}(?:\s?[0-9A-Z]){20}/g, " ");
   const reference = nearMatch(tNoIban,
-    /Payment\s*Reference\s*Number|Transaction\s*Reference|Reference\s*(?:Number|No\.?)|Ref\.?\s*No\.?|Transfer\s*(?:No|Number|Reference)|Transaction\s*(?:No|Number|ID)|رقم\s*العملية|الرقم\s*المرجعي|رقم\s*المرجع|رقم\s*الحوالة/i,
+    /Payment\s*Reference\s*Number|Transaction\s*Reference|Reference\s*(?:Number|No\.?)|Ref\.?(?:\s*No\.?)?|Transfer\s*(?:No|Number|Reference)|Transaction\s*(?:No|Number|ID)|رقم\s*العملية|الرقم\s*المرجعي|رقم\s*المرجع|رقم\s*الحوالة/i,
     /(\d{8,24})/, 80);
-  const transferKind = /Between\s*my\s*accounts|بين\s*حساباتي/i.test(t) ? "own_accounts"
-    : /International\s*Transfer|حوالة\s*دولية/i.test(t) ? "international"
-    : /Local\s*Transfer/i.test(t) ? "local" : null;
   const dateM = t.match(/\b(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})\b/);
-  const bankM = t.match(/alrajhi|rajhi|الراجحي|alinma|الإنماء|الاهلي|الأهلي|riyad|الرياض|sabb|ساب|anb|البلاد|albilad/i);
+  const bankM = t.match(/alrajhi|al\s*rajhi|rajhi|الراجحي|alinma|الإنماء|الاهلي|الأهلي|riyad|الرياض|sabb|ساب|anb|البلاد|albilad/i);
+  // اسم المستفيد: أحرف لاتينية كبيرة قبل IBAN المستفيد مباشرة (OMAR ALDAQARISA14…)
+  let beneficiary = null;
+  if (toIban) {
+    const toAt = ibansFull.find((e) => e.iban === toIban)?.at ?? t.indexOf(toIban);
+    const before = t.slice(Math.max(0, toAt - 40), toAt);
+    const nm = before.match(/([A-Z][A-Z\s]{4,38})$/);
+    if (nm) beneficiary = nm[1].replace(/\s+/g, " ").trim();
+  }
   return {
     amount, currency: /SAR|ر\.?\s?س|ريال/i.test(t) ? "SAR" : null,
     reference: reference || null,
-    iban: ibanM ? ibanM[0].replace(/\s/g, "") : null,
-    transfer_kind: transferKind,
+    iban: toIban || fromIban || null,
+    from_iban: fromIban, to_iban: toIban, from_iban_last4: fromLast4, to_iban_last4: toLast4,
+    beneficiary_name: beneficiary,
+    transfer_kind: /Between\s*my\s*accounts|بين\s*حساباتي/i.test(t) ? "own_accounts"
+      : /International\s*Transfer|حوالة\s*دولية/i.test(t) ? "international"
+      : /Local\s*Transfer/i.test(t) ? "local" : null,
     transaction_date: dateM ? `${dateM[1]}-${String(dateM[2]).padStart(2, "0")}-${String(dateM[3]).padStart(2, "0")}` : null,
     bank: bankM ? bankM[0] : null,
     doc_kind: /Transfer\s*Receipt|إشعار\s*تحويل|حوالة/i.test(t) ? "transfer_receipt"
@@ -2258,6 +2306,44 @@ async function processAttachment(url, mime) {
   return { status: text ? "extracted" : (isPdf ? "no_text" : "not_extractable"),
     sha256: got.sha256, bytes: got.bytes, contentType: got.contentType,
     text_len: text.length, text: text.slice(0, 4000), fields };
+}
+
+/* إعادة معالجة سجل وارد: إعادة جلب المرفق واستخراجه ثم إعادة التحليل.
+   للسجلات غير المعتمدة فقط — لا تلمس أي سجل اعتُمد أو رُحّل. تُسجَّل في audit. */
+async function reprocessIntake(client, payload, opts = {}) {
+  const id = String(payload.id || "").trim();
+  if (!id) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  const row = (await client.query("select * from whatsapp_intake where id=$1", [id])).rows[0];
+  if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+  if (!["new", "parsed", "needs_review", "failed"].includes(row.status)) {
+    const e = new Error(`لا يمكن إعادة معالجة سجل بحالة ${row.status}`); e.statusCode = 409; throw e;
+  }
+  let proc = null;
+  if (row.attachment_url) {
+    try {
+      proc = typeof opts.processAttachment === "function"
+        ? await opts.processAttachment(row.attachment_url, row.attachment_mime)
+        : await processAttachment(row.attachment_url, row.attachment_mime);
+    } catch (e) { proc = { status: "error", reason: String(e.message || "").slice(0, 120) }; }
+  }
+  const fields = (proc && proc.fields) || {};
+  const meta = Object.assign({}, row.attachment_meta || {}, proc ? { extraction: proc } : {});
+  await client.query(
+    `update whatsapp_intake set attachment_meta=$2::jsonb,
+       attachment_sha256=coalesce($3, attachment_sha256),
+       transaction_reference=coalesce($4, transaction_reference),
+       parsed_data=null, status='new', error_message=null, updated_at=now()
+     where id=$1`,
+    [id, JSON.stringify(meta), proc?.sha256 || null, fields.reference || null]);
+  const parsed = await parseIntake(client, id, { parser: opts.parser });
+  await logAgentAction(client, {
+    actorType: "system", actorName: "reprocess", agentRole: "accounting", action: "intake.reprocess",
+    targetType: "whatsapp_intake", targetId: id,
+    summary: `إعادة معالجة: ${proc?.status || "بلا مرفق"} ⇒ ${parsed.classification} (${parsed.status})`,
+    beforeState: { classification: row.classification, amount: row.amount, status: row.status },
+    afterState: { classification: parsed.classification, amount: parsed.amount, status: parsed.status },
+  });
+  return parsed;
 }
 
 /* ─── WhatsApp Intake Review (M2): صندوق واتساب + مراجعة بشرية ─── */
@@ -2537,6 +2623,18 @@ function intakeAccountTokens(name) {
 // استخراج الحسابات من النص بالاتجاه:
 //   من ⇒ source · إلى/لحساب/في/على ⇒ destination (المال داخل إلى الحساب).
 // لا تخمين إطلاقاً: حساب غير مذكور صراحةً يبقى null ويُدرَج في missing_fields.
+// يطابق الآيبان المستخرج من الإيصال مع حسابات المؤسسة (كامل أو آخر 4 أرقام عند التقنيع)
+function matchAccountByIban(accounts, iban, last4) {
+  const clean = (v) => String(v || "").replace(/\s/g, "").toUpperCase();
+  if (iban) { const hit = accounts.find((a) => clean(a.iban) && clean(a.iban) === clean(iban)); if (hit) return hit.id; }
+  const l4 = String(last4 || "").slice(-4);
+  if (l4) {
+    const hits = accounts.filter((a) => (a.iban_last4 && String(a.iban_last4).slice(-4) === l4) || (clean(a.iban) && clean(a.iban).slice(-4) === l4));
+    if (hits.length === 1) return hits[0].id;   // تطابق واحد فقط، وإلا نترك القرار للبشر
+  }
+  return null;
+}
+
 function resolveAccountsFromText(text, accounts) {
   const t = normalizeArabic(toLatinDigits(String(text || "")));
   let source = null, dest = null;
@@ -2588,6 +2686,8 @@ function finalizeIntakeParse(base, accIds, parserName) {
     confidence_score: conf, missing_fields: missing, parser: parserName,
     description: base.description || null, review_note: reviewNote,
     document: base.document || null,
+    counterparty: base.counterparty || null, bank_from: base.bank_from || null,
+    from_iban_last4: base.from_iban_last4 || null, to_iban_last4: base.to_iban_last4 || null,
   };
   return { parsed_data, classification, amount, currency: base.currency || "SAR",
     source_account_id: source, destination_account_id: dest,
@@ -2629,8 +2729,20 @@ async function parseIntake(client, id, opts = {}) {
     base.document = { doc_kind: fields.doc_kind || null, transfer_kind: fields.transfer_kind || null, bank: fields.bank || null,
       transaction_date: fields.transaction_date || null, reference: fields.reference || null };
   }
-  const accounts = (await client.query("select id, name from bank_accounts where is_active = true")).rows;
+  const accounts = (await client.query("select id, name, to_jsonb(b)->>'iban' as iban, to_jsonb(b)->>'iban_last4' as iban_last4 from bank_accounts b where is_active = true")).rows;
   const accIds = resolveAccountsFromText(effectiveText, accounts);
+  // الإيصال أوثق من النص: نطابق الآيبان المرسِل/المستفيد مع حسابات المؤسسة
+  if (ext && ext.fields) {
+    const f2 = ext.fields;
+    const src = matchAccountByIban(accounts, f2.from_iban, f2.from_iban_last4);
+    const dst = matchAccountByIban(accounts, f2.to_iban, f2.to_iban_last4);
+    if (src) accIds.source_account_id = src;
+    if (dst) accIds.destination_account_id = dst;
+    base.counterparty = f2.beneficiary_name || null;
+    base.bank_from = f2.bank || null;
+    base.from_iban_last4 = f2.from_iban_last4 || null;
+    base.to_iban_last4 = f2.to_iban_last4 || null;
+  }
   const fin = finalizeIntakeParse(base, accIds, parser.name);
   await client.query(
     `update whatsapp_intake set
@@ -3175,6 +3287,11 @@ module.exports = async function handler(req, res) {
       const data = req.method === "GET" ? await getPeachCursor(client) : await updatePeachCursor(client, req.body || {});
       return res.status(200).json({ ok: true, data });
     }
+    if (req.method === "POST" && path === "/intake/reprocess") {
+      const auth = await checkIntakeAuth(client, req);
+      if (!auth.ok && !(user && user.role === "owner")) return res.status(401).json({ ok: false, error: "غير مصرح" });
+      return res.status(200).json({ ok: true, data: await reprocessIntake(client, req.body || {}) });
+    }
     if (req.method === "GET" && path === "/intake") {
       requireIntakeApprover(user); // M2.5: القراءة أيضاً محصورة بـ owner/accountant
       return res.status(200).json({ ok: true, data: await listIntake(client, { status: query.status }) });
@@ -3619,8 +3736,8 @@ module.exports.__m26 = {
 };
 // دوال P1.7 (المرفقات والاستخراج) لأغراض الاختبار فقط
 module.exports.__p17 = {
-  fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS,
-  parseFinancialCaption, ruleClassify,
+  fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS, attachmentHostAllowed,
+  parseFinancialCaption, ruleClassify, matchAccountByIban,
 };
 // دوال P2.1 (وكيل المبيعات) لأغراض الاختبار فقط
 module.exports.__p21 = {
@@ -3631,6 +3748,7 @@ module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
   changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
 };
+module.exports.__reprocess = { reprocessIntake };
 module.exports.__cloudsync = { getPeachCursor, updatePeachCursor, checkIntakeAuth };
 module.exports.__p23 = {
   approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
