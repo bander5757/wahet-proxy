@@ -2303,9 +2303,13 @@ async function processAttachment(url, mime) {
     try { text = pdfExtractText(got.buf) || ""; } catch (e) { text = ""; }
     if (text) fields = extractReceiptFields(text);
   }
-  return { status: text ? "extracted" : (isPdf ? "no_text" : "not_extractable"),
+  // تنظيف: بعض ملفات PDF تُخرج محارف تحكم/NUL تكسر التخزين في jsonb
+  const clean = (v) => String(v || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+  const cleanText = clean(text);
+  for (const k of Object.keys(fields)) if (typeof fields[k] === "string") fields[k] = clean(fields[k]);
+  return { status: cleanText ? "extracted" : (isPdf ? "no_text" : "not_extractable"),
     sha256: got.sha256, bytes: got.bytes, contentType: got.contentType,
-    text_len: text.length, text: text.slice(0, 4000), fields };
+    text_len: cleanText.length, text: cleanText.slice(0, 4000), fields };
 }
 
 /* إعادة معالجة سجل وارد: إعادة جلب المرفق واستخراجه ثم إعادة التحليل.
