@@ -3490,10 +3490,6 @@ module.exports = async function handler(req, res) {
       return res.status(201).json({ ok: true, data: await createVehicleTask(client, req.body || {}) });
     }
 
-    if (req.method === "POST" && path === "/vehicle-tasks/update") {
-      return res.status(200).json({ ok: true, data: await updateVehicleTask(client, req.body || {}) });
-    }
-
     if (req.method === "POST" && path === "/vehicle-tasks/delete") {
       await deleteVehicleTask(client, String(req.body?.id || ""));
       return res.status(200).json({ ok: true });
