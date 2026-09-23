@@ -33,6 +33,7 @@ async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === "false" ? false : { rejectUnauthorized: false } });
   const client = await pool.connect();
   const before = (await client.query("select value from app_settings where key='peach_team_sync'")).rows[0]?.value || null;
+  const fin0 = (await client.query("select count(*)::int n from finance_entries")).rows[0].n;
   const aa0 = (await client.query("select count(*)::int n from agent_actions")).rows[0].n;
   try {
     const cur = await getPeachCursor(client);
@@ -47,7 +48,7 @@ async function main() {
     const up2 = await updatePeachCursor(client, { last_created_at: "2026-09-17T09:05:00.000Z", last_id: 1000000, actor: "test-cloud", processed: 0, counts: {}, stopped_at: 5 });
     const audit2 = (await client.query("select status from agent_actions where action='intake.peach_sync' order by created_at desc limit 1")).rows[0];
     ok("توقف بسبب فشل ⇒ الحالة failed", audit2.status === "failed" && up2.runs === up.runs + 1);
-    ok("لا finance_entry", (await client.query("select count(*)::int n from finance_entries")).rows[0].n === 0);
+    ok("لا finance_entry جديد", (await client.query("select count(*)::int n from finance_entries")).rows[0].n === fin0, "قارن بالحالة قبل التشغيل");
 
     console.log("\n— رمز المزامنة المستقل —");
     const prevTok = (await client.query("select value from app_settings where key='sync_tokens'")).rows[0]?.value || null;

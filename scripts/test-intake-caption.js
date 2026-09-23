@@ -14,7 +14,7 @@ const ok = (n, c, e) => { if (c) { passed++; console.log(`  ✅ ${n}`); } else {
 // قالب «بين حساباتي» كما ظهر هيكله في الإيصال الحقيقي (أرقام وهمية، IBAN بمسافات، بلا خانة مرجع)
 const OWN_TEXT = "Transfer ReceiptDate 2026/09/11 - 3:15 PM Between my accounts Details 300 SARAmount Al Rajhi BankFrom SA12 3456 7890 1234 5678 9012 To Alrajhibank.com.sa800 124 0000";
 // قالب «تحويل محلي» بمرجع صريح (أرقام وهمية)
-const LOCAL_TEXT = (ref) => `Transfer ReceiptDate 2026/09/12 - 06:03 PMLocal Transfers Transaction Details 450.00Total Amount 21000010006080145472From SA6220EC0208992000020938To ${ref}Payment Reference NumberAlrajhibank.com.sa800 122 8888`;
+const LOCAL_TEXT = (ref) => `Transfer ReceiptDate 2026/09/12 - 06:03 PMLocal Transfers Transaction Details 450.00Total Amount 21000010006080145472From SA9900000000000000009999To ${ref}Payment Reference NumberAlrajhibank.com.sa800 122 8888`;
 const fakeProc = (sha, text) => async () => ({ status: "extracted", sha256: sha, bytes: 1000, contentType: "application/pdf",
   text_len: text.length, text, fields: extractReceiptFields(text) });
 

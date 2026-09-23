@@ -2240,11 +2240,14 @@ function extractReceiptFields(text) {
   const sideOf = (entry, len) => {
     const after = t.slice(entry.at + len, entry.at + len + 14);
     const before = t.slice(Math.max(0, entry.at - 14), entry.at);
-    // التسمية قبل القيمة (إيصال إنجليزي: From SA…) لها الأولوية على ما بعدها (إيصال RTL: …SA…To)
+    // ترتيب الأولوية: تسمية ملتصقة بعد القيمة (نمط الراجحي RTL: …0938To) ثم تسمية قبلها
+    // ثم تسمية بعدها بمسافة. «From» السابقة قد تخص الحقل السابق فلا تُقدَّم على الملتصقة.
+    if (/^(To|الى|إلى)\b/.test(after)) return "to";
+    if (/^(From|من)\b/.test(after)) return "from";
     if (/(From|من)\s*$/.test(before)) return "from";
     if (/(To|الى|إلى)\s*$/.test(before)) return "to";
-    if (/^\s*To\b|^\s*الى|^\s*إلى/.test(after)) return "to";
-    if (/^\s*From\b|^\s*من/.test(after)) return "from";
+    if (/^\s+(To|الى|إلى)\b/.test(after)) return "to";
+    if (/^\s+(From|من)\b/.test(after)) return "from";
     return null;
   };
   let fromIban = null, toIban = null, fromLast4 = null, toLast4 = null;
@@ -2742,6 +2745,11 @@ async function parseIntake(client, id, opts = {}) {
     const dst = matchAccountByIban(accounts, f2.to_iban, f2.to_iban_last4);
     if (src) accIds.source_account_id = src;
     if (dst) accIds.destination_account_id = dst;
+    // تعارض: التعليق يقول مصروف بينما الإيصال يُظهر دخول المبلغ إلى أحد حساباتنا
+    if (dst && !src && ["expense", "custody"].includes(base.classification)) {
+      base.review_note = base.review_note
+        || "الإيصال يُظهر دخول المبلغ إلى حساب المؤسسة بينما التعليق يشير إلى صرف — تحقّق من اتجاه الحركة";
+    }
     base.counterparty = f2.beneficiary_name || null;
     base.bank_from = f2.bank || null;
     base.from_iban_last4 = f2.from_iban_last4 || null;

@@ -46,7 +46,7 @@ async function main() {
 
   // خطوط الأساس
   const base = await client.query(
-    "select (select count(*)::int from whatsapp_intake) wi, (select count(*)::int from agent_actions) aa"
+    "select (select count(*)::int from whatsapp_intake) wi, (select count(*)::int from agent_actions) aa, (select count(*)::int from finance_entries) fin"
   );
   console.log("baseline:", base.rows[0]);
 
@@ -113,7 +113,8 @@ async function main() {
 
     // تأكيد عدم إنشاء أي finance_entry أثناء الاختبار
     const fin = await client.query("select count(*)::int n from finance_entries");
-    ok("لا finance_entry أُنشئ", fin.rows[0].n === 0, `finance_entries=${fin.rows[0].n}`);
+    // مقارنة بالحالة قبل التشغيل، لا بصفر مطلق (قد توجد قيود قديمة في staging)
+    ok("لا finance_entry أُنشئ", fin.rows[0].n === base.rows[0].fin, `finance_entries=${fin.rows[0].n} baseline=${base.rows[0].fin}`);
   } finally {
     // ── تنظيف تام ──
     console.log("\n— تنظيف بيانات الاختبار —");
