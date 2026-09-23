@@ -2353,6 +2353,69 @@ async function reprocessIntake(client, payload, opts = {}) {
   return parsed;
 }
 
+/* قراءة بصرية للمستندات الممسوحة (صور/PDF بلا نص):
+   العميل (جلسة Claude) يقرأ الملف ويرسل الحقول الظاهرة فقط. التصنيف يبقى بقواعدنا،
+   والسجل يبقى للمراجعة البشرية. لا يُقبل أي حقل مخترع: نتحقق من الشكل والحدود. */
+function sanitizeVisionFields(input) {
+  const f = input && typeof input === "object" ? input : {};
+  const out = {};
+  const amount = Number(String(f.amount ?? "").replace(/,/g, ""));
+  if (Number.isFinite(amount) && amount > 0 && amount < 100000000) out.amount = Math.round(amount * 100) / 100;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(f.transaction_date || ""))) out.transaction_date = String(f.transaction_date);
+  if (/^\d{6,24}$/.test(String(f.reference || ""))) out.reference = String(f.reference);
+  if (/^\d{4}$/.test(String(f.from_iban_last4 || ""))) out.from_iban_last4 = String(f.from_iban_last4);
+  if (/^\d{4}$/.test(String(f.to_iban_last4 || ""))) out.to_iban_last4 = String(f.to_iban_last4);
+  if (/^SA[0-9A-Z]{22}$/.test(String(f.to_iban || "").replace(/\s/g, ""))) out.to_iban = String(f.to_iban).replace(/\s/g, "");
+  if (/^SA[0-9A-Z]{22}$/.test(String(f.from_iban || "").replace(/\s/g, ""))) out.from_iban = String(f.from_iban).replace(/\s/g, "");
+  if (f.beneficiary_name) out.beneficiary_name = String(f.beneficiary_name).slice(0, 60);
+  if (f.bank) out.bank = String(f.bank).slice(0, 40);
+  if (["transfer_receipt", "invoice", "receipt"].includes(f.doc_kind)) out.doc_kind = f.doc_kind;
+  if (["own_accounts", "local", "international"].includes(f.transfer_kind)) out.transfer_kind = f.transfer_kind;
+  if (f.currency) out.currency = String(f.currency).slice(0, 8);
+  return out;
+}
+async function listPendingVision(client, limit = 20) {
+  const r = await client.query(
+    `select id, attachment_url, attachment_mime, attachment_name, coalesce(original_message,'') as caption
+     from whatsapp_intake
+     where attachment_url is not null and status in ('new','parsed','needs_review','failed')
+       and coalesce((attachment_meta->'extraction'->>'text_len')::int, 0) = 0
+       and coalesce(attachment_meta->'extraction'->>'vision', '') = ''
+     order by created_at limit $1`, [Math.min(Number(limit) || 20, 50)]);
+  return r.rows;
+}
+async function applyVisionFields(client, payload) {
+  const id = String(payload.id || "").trim();
+  if (!id) { const e = new Error("معرّف السجل مطلوب"); e.statusCode = 400; throw e; }
+  const row = (await client.query("select * from whatsapp_intake where id=$1", [id])).rows[0];
+  if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+  if (!["new", "parsed", "needs_review", "failed"].includes(row.status)) {
+    const e = new Error(`لا يمكن تعديل سجل بحالة ${row.status}`); e.statusCode = 409; throw e;
+  }
+  const fields = sanitizeVisionFields(payload.fields);
+  const unreadable = payload.unreadable === true || Object.keys(fields).length === 0;
+  const ex = Object.assign({}, (row.attachment_meta || {}).extraction || {}, {
+    vision: unreadable ? "unreadable" : "extracted", vision_at: new Date().toISOString(),
+    status: unreadable ? "no_text" : "vision", fields: Object.assign({}, ((row.attachment_meta || {}).extraction || {}).fields || {}, fields),
+  });
+  const meta = Object.assign({}, row.attachment_meta || {}, { extraction: ex });
+  await client.query(
+    `update whatsapp_intake set attachment_meta=$2::jsonb,
+       transaction_reference=coalesce($3, transaction_reference),
+       parsed_data=null, status='new', error_message=null, updated_at=now() where id=$1`,
+    [id, JSON.stringify(meta), fields.reference || null]);
+  const parsed = await parseIntake(client, id);
+  // القراءة البصرية ليست يقيناً: تبقى للمراجعة دائماً
+  await client.query("update whatsapp_intake set status='needs_review' where id=$1 and status='parsed'", [id]);
+  await logAgentAction(client, {
+    actorType: "agent", actorName: String(payload.source || "claude-vision").slice(0, 40), agentRole: "accounting",
+    action: "intake.vision", targetType: "whatsapp_intake", targetId: id,
+    summary: unreadable ? "قراءة بصرية: المستند غير مقروء" : `قراءة بصرية: ${Object.keys(fields).join("، ")}`,
+    afterState: { amount: parsed.amount, classification: parsed.classification },
+  });
+  return { id, applied: Object.keys(fields), unreadable, amount: parsed.amount, classification: parsed.classification };
+}
+
 /* ─── WhatsApp Intake Review (M2): صندوق واتساب + مراجعة بشرية ─── */
 
 function intakeRow(row) {
@@ -3299,6 +3362,16 @@ module.exports = async function handler(req, res) {
       const data = req.method === "GET" ? await getPeachCursor(client) : await updatePeachCursor(client, req.body || {});
       return res.status(200).json({ ok: true, data });
     }
+    if (req.method === "GET" && path === "/intake/pending-vision") {
+      const auth = await checkIntakeAuth(client, req);
+      if (!auth.ok && !(user && user.role === "owner")) return res.status(401).json({ ok: false, error: "غير مصرح" });
+      return res.status(200).json({ ok: true, data: await listPendingVision(client, query.limit) });
+    }
+    if (req.method === "POST" && path === "/intake/vision-fields") {
+      const auth = await checkIntakeAuth(client, req);
+      if (!auth.ok && !(user && user.role === "owner")) return res.status(401).json({ ok: false, error: "غير مصرح" });
+      return res.status(200).json({ ok: true, data: await applyVisionFields(client, req.body || {}) });
+    }
     if (req.method === "POST" && path === "/intake/reprocess") {
       const auth = await checkIntakeAuth(client, req);
       if (!auth.ok && !(user && user.role === "owner")) return res.status(401).json({ ok: false, error: "غير مصرح" });
@@ -3415,6 +3488,10 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/vehicle-tasks") {
       return res.status(201).json({ ok: true, data: await createVehicleTask(client, req.body || {}) });
+    }
+
+    if (req.method === "POST" && path === "/vehicle-tasks/update") {
+      return res.status(200).json({ ok: true, data: await updateVehicleTask(client, req.body || {}) });
     }
 
     if (req.method === "POST" && path === "/vehicle-tasks/delete") {
@@ -3760,7 +3837,7 @@ module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
   changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
 };
-module.exports.__reprocess = { reprocessIntake };
+module.exports.__reprocess = { reprocessIntake, applyVisionFields, listPendingVision, sanitizeVisionFields };
 module.exports.__cloudsync = { getPeachCursor, updatePeachCursor, checkIntakeAuth };
 module.exports.__p23 = {
   approveAndSendSalesReply, recordSalesSendResult, salesSendBlockers, getSalesSendSettings, setSalesSendSettings,
