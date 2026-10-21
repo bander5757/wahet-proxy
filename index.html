@@ -5781,6 +5781,17 @@ function renderIntake() {
       <div style="font-size:13px;white-space:pre-wrap;margin-bottom:8px">${htmlEscape(it.original_message || '')}</div>
       ${it.parsed_data?.description ? `<div style="font-size:12px;margin-bottom:6px">الوصف: <b>${htmlEscape(it.parsed_data.description)}</b></div>` : ''}
       ${it.parsed_data?.review_note ? `<div style="font-size:11px;color:#EF9F27;margin-bottom:6px">⚠️ ${htmlEscape(it.parsed_data.review_note)}</div>` : ''}
+      ${it.analysis ? `<div style="margin:8px 0;padding:8px;border:0.5px dashed #2e3244;border-radius:8px;font-size:11px">
+        <div style="color:#9a9898;margin-bottom:4px">🔎 اقتراح المحلل (${htmlEscape(it.analysis.analyzer || '')} ${htmlEscape(it.analysis.analyzer_version || '')}) — للاطلاع فقط، القرار لك</div>
+        ${it.analysis.status !== 'completed' ? `<div style="color:#E24B4A">حالة التحليل: ${htmlEscape(it.analysis.status)}</div>` : ''}
+        ${it.analysis.suggested_classification ? `<div>التصنيف المقترح: ${htmlEscape(it.analysis.suggested_classification)}</div>` : ''}
+        ${it.analysis.items_count ? `<div>بنود: ${it.analysis.items_count} · مصروف ${money(it.analysis.items_spent_total || 0)}${it.analysis.items_in_total ? ` · مستلم ${money(it.analysis.items_in_total)}` : ''}${it.analysis.items_returned_total ? ` · مُعاد ${money(it.analysis.items_returned_total)}` : ''}</div>` : ''}
+        ${it.analysis.expenses_match === true ? `<div style="color:#5DCAA5">مطابقة المصروفات: مطابق تماماً لإجمالي المستند (${money(it.analysis.reported_total)})</div>` : it.analysis.expenses_match === false ? `<div style="color:#E24B4A">مطابقة المصروفات: فرق ${money(it.analysis.expenses_diff)} عن إجمالي المستند (${money(it.analysis.reported_total)})</div>` : it.analysis.items_count ? `<div style="color:#9a9898">مطابقة المصروفات: غير محسوبة (لا إجمالي معلن)</div>` : ''}
+        ${it.analysis.settlement_status === 'balanced' ? `<div style="color:#5DCAA5">تسوية العهدة: متزنة</div>` : it.analysis.settlement_status === 'mismatch' ? `<div style="color:#E24B4A">تسوية العهدة: فرق ${money(it.analysis.settlement_diff)}</div>` : it.analysis.items_count ? `<div style="color:#9a9898">تسوية العهدة: غير محسوبة (ينقص رصيد افتتاحي أو ختامي)</div>` : ''}
+        ${(it.analysis.missing_fields || []).length ? `<div>ناقص برأي المحلل: ${htmlEscape((it.analysis.missing_fields || []).join('، '))}</div>` : ''}
+        ${(it.analysis.questions || []).length ? `<div style="margin-top:4px">أسئلة المحلل:<ul style="margin:2px 0 0;padding-right:16px">${(it.analysis.questions || []).map(q => `<li>${htmlEscape(q.text || '')}</li>`).join('')}</ul></div>` : ''}
+        ${(it.analysis.alerts || []).length ? `<div style="color:#EF9F27;margin-top:4px">${(it.analysis.alerts || []).map(a => '⚠️ ' + htmlEscape(a)).join('<br>')}</div>` : ''}
+      </div>` : ''}
       <div class="grid-2" style="font-size:11px;color:#9a9898;gap:4px">
         <div>الوقت: ${it.message_timestamp ? String(it.message_timestamp).slice(0,16).replace('T',' ') : '—'}</div>
         <div>التصنيف: ${htmlEscape(it.classification || '—')}</div>

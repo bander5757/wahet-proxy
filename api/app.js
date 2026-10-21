@@ -2416,6 +2416,299 @@ async function applyVisionFields(client, payload) {
   return { id, applied: Object.keys(fields), unreadable, amount: parsed.amount, classification: parsed.classification };
 }
 
+/* ─── محلل مراقب لصندوق الواتساب (Observer analyst) ───
+   محلل خارجي (eve مثلاً) يقرأ السجلات المطلوب تحليلها ويحفظ *اقتراحاً* فقط.
+   حدود صارمة يفرضها الكود لا التعليمات:
+     • لا يعتمد ولا يرفض ولا يرحّل ولا يرسل — لا مسار له إلى ذلك إطلاقاً.
+     • لا يكتب في whatsapp_intake: لا parsed_data ولا final_data ولا status.
+     • لا ينشئ أي finance_entry.
+     • رمزه بنطاق intake_analyze وحده، فلا يصلح لإدخال رسائل (intake_sync) ولا لمفتاح الوارد. */
+const ANALYSIS_SCOPE = "intake_analyze";
+const ANALYSIS_CLASSIFICATIONS = ["expense", "receipt", "internal_transfer", "custody", "refund", "operational_update", "unknown"];
+const ANALYSIS_ITEM_KINDS = ["expense", "funding", "advance", "collection", "return", "other"];
+const ANALYSIS_ATTACHMENT_KINDS = ["none", "pdf_text", "pdf_scan", "image", "excel", "other"];
+const ANALYSIS_MAX_ITEMS = 500;
+
+async function checkAnalystAuth(client, req) {
+  const token = String(req.headers["x-analyst-token"] || "");
+  if (!token) return { ok: false };
+  const stored = (await client.query("select value from app_settings where key='sync_tokens'")).rows[0]?.value;
+  const list = Array.isArray(stored?.tokens) ? stored.tokens : [];
+  const hit = list.find((t) => t && t.hash === sha256(token) && t.active !== false && t.scope === ANALYSIS_SCOPE);
+  return hit ? { ok: true, via: "analyst:" + String(hit.label || "unnamed").slice(0, 40) } : { ok: false };
+}
+// القراءة متاحة للمحلل أو لمراجع بشري بجلسة؛ الكتابة للمحلل وحده.
+async function requireAnalystRead(client, req, user) {
+  if ((await checkAnalystAuth(client, req)).ok) return;
+  if (user && ["owner", "accountant"].includes(user.role)) return;
+  const e = new Error("غير مصرح"); e.statusCode = 401; throw e;
+}
+
+const clipText = (v, n) => String(v == null ? "" : v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").slice(0, n);
+// كل الحسابات بالهللات (أعداد صحيحة) فلا يتسرّب خطأ العوائم إلى المطابقة.
+// الفارغ يُقرأ صفراً في JS، والصفر ليس مبلغاً — نرفض الاثنين صراحةً.
+function halalas(v) {
+  const raw = String(v == null ? "" : v).replace(/,/g, "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n >= 1e9) return null;
+  return Math.round(n * 100);
+}
+// رصيد قد يكون صفراً أو سالباً (الرصيد الافتتاحي/الختامي)، فله قاعدة أوسع
+function halalasSigned(v) {
+  const raw = String(v == null ? "" : v).replace(/,/g, "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || Math.abs(n) >= 1e9) return null;
+  return Math.round(n * 100);
+}
+const riyals = (h) => (h == null ? null : Math.round(h) / 100);
+function analysisMoney(v) {
+  const h = halalas(v);
+  return h == null ? null : riyals(h);
+}
+// ينقّي ما يرسله المحلل: كل حقل بشكله وحدوده، وما لا يُعرف يُهمل بصمت.
+function sanitizeAnalysis(payload) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  const f = p.fields && typeof p.fields === "object" && !Array.isArray(p.fields) ? p.fields : {};
+  const fields = {};
+  if (analysisMoney(f.amount) != null) fields.amount = analysisMoney(f.amount);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(f.transaction_date || ""))) fields.transaction_date = String(f.transaction_date);
+  if (/^\d{6,24}$/.test(String(f.reference || ""))) fields.reference = String(f.reference);
+  for (const k of ["counterparty", "bank", "site", "payer", "payee", "custody_holder", "description"]) {
+    if (f[k]) fields[k] = clipText(f[k], 120);
+  }
+  if (/^\d{4}$/.test(String(f.from_iban_last4 || ""))) fields.from_iban_last4 = String(f.from_iban_last4);
+  if (/^\d{4}$/.test(String(f.to_iban_last4 || ""))) fields.to_iban_last4 = String(f.to_iban_last4);
+
+  const items = (Array.isArray(p.items) ? p.items : []).slice(0, ANALYSIS_MAX_ITEMS).map((raw) => {
+    const it = raw && typeof raw === "object" ? raw : {};
+    const amount = analysisMoney(it.amount);
+    if (amount == null) return null;
+    return {
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(it.date || "")) ? String(it.date) : null,
+      description: clipText(it.description, 200),
+      amount,
+      direction: it.direction === "in" ? "in" : "out",
+      kind: ANALYSIS_ITEM_KINDS.includes(it.kind) ? it.kind : "other",
+      site: it.site ? clipText(it.site, 60) : null,
+      payee: it.payee ? clipText(it.payee, 60) : null,
+      row_no: Number.isInteger(it.row_no) ? it.row_no : null,
+    };
+  }).filter(Boolean);
+  // ── المطابقة والتسوية: حساب بالهللات، بلا أي تسامح، والفرق يُعرض كما هو ──
+  // الداخل والخارج منفصلان، والمُعاد يُفصل عن المصروف لأن معادلة التسوية تطرحهما مستقلّين.
+  const sumH = (pred) => items.reduce((a, x) => (pred(x) ? a + Math.round(x.amount * 100) : a), 0);
+  const inH = sumH((x) => x.direction === "in");
+  const spentH = sumH((x) => x.direction === "out" && x.kind !== "return");
+  const returnedH = sumH((x) => x.direction === "out" && x.kind === "return");
+  const reportedH = halalas(p.reported_total);
+
+  // (أ) مطابقة إجمالي بنود المصروفات مع الإجمالي المعلن في المستند — تطابق تام أو لا
+  const expensesDiffH = reportedH != null && items.length ? spentH - reportedH : null;
+  const expensesMatch = expensesDiffH == null ? null : expensesDiffH === 0;
+
+  // (ب) تسوية العهدة: افتتاحي + مستلم − مصروف − مُعاد = متبقٍ
+  const openingH = halalasSigned(p.opening_balance);
+  const closingH = halalasSigned(p.closing_balance);
+  const canSettle = openingH != null && closingH != null && items.length > 0;
+  const expectedClosingH = canSettle ? openingH + inH - spentH - returnedH : null;
+  const settlementDiffH = canSettle ? closingH - expectedClosingH : null;
+  // «غير محسوبة» عند نقص الحقول — ولا تُعدّ نجاحاً أبداً
+  const settlementStatus = !canSettle ? "not_computed" : (settlementDiffH === 0 ? "balanced" : "mismatch");
+
+  const status = ["completed", "failed", "skipped"].includes(p.status) ? p.status : "completed";
+  return {
+    analyzer: clipText(p.analyzer, 40),
+    analyzer_version: clipText(p.analyzer_version, 40),
+    status,
+    fields,
+    suggested_classification: ANALYSIS_CLASSIFICATIONS.includes(p.suggested_classification) ? p.suggested_classification : null,
+    missing_fields: (Array.isArray(p.missing_fields) ? p.missing_fields : []).slice(0, 20).map((x) => clipText(x, 40)).filter(Boolean),
+    questions: (Array.isArray(p.questions) ? p.questions : []).slice(0, 20)
+      .map((q) => (typeof q === "string" ? { text: clipText(q, 300) } : { key: q && q.key ? clipText(q.key, 40) : null, text: clipText(q && q.text, 300) }))
+      .filter((q) => q.text),
+    alerts: (Array.isArray(p.alerts) ? p.alerts : []).slice(0, 20).map((x) => clipText(x, 300)).filter(Boolean),
+    items, items_count: items.length,
+    items_in_total: riyals(inH), items_spent_total: riyals(spentH), items_returned_total: riyals(returnedH),
+    reported_total: riyals(reportedH),
+    expenses_diff: riyals(expensesDiffH), expenses_match: expensesMatch,
+    opening_balance: riyals(openingH), closing_balance: riyals(closingH),
+    expected_closing: riyals(expectedClosingH), settlement_diff: riyals(settlementDiffH),
+    settlement_status: settlementStatus,
+    attachment_kind: ANALYSIS_ATTACHMENT_KINDS.includes(p.attachment_kind) ? p.attachment_kind : null,
+    needs_vision: p.needs_vision === true,
+    needs_excel: p.needs_excel === true,
+    error: p.error ? clipText(p.error, 500) : null,
+  };
+}
+
+async function analysisTableReady(client) {
+  const { rows } = await client.query("select to_regclass('public.intake_analysis') as t");
+  return rows[0] && rows[0].t !== null;
+}
+function requireAnalysisTable(ready) {
+  if (!ready) { const e = new Error("جدول intake_analysis غير مُطبَّق بعد (migration قيد المراجعة)"); e.statusCode = 503; throw e; }
+}
+
+// السجلات المطلوب تحليلها: قابلة للمراجعة، ولم يحلّلها هذا المحلل بهذا الإصدار بعد.
+async function analysisQueue(client, { analyzer, version, limit, includeSkipped } = {}) {
+  requireAnalysisTable(await analysisTableReady(client));
+  const a = clipText(analyzer, 40), v = clipText(version, 40);
+  if (!a || !v) { const e = new Error("analyzer و analyzer_version مطلوبان"); e.statusCode = 400; throw e; }
+  // الاستبعاد: التحليلات المكتملة دائماً، والمتخطّاة إلا إذا طلبها المحلل صراحةً.
+  const blocking = includeSkipped === true ? ["completed"] : ["completed", "skipped"];
+  const { rows } = await client.query(
+    `select wi.id, wi.provider_message_id, wi.sender_name, wi.original_message,
+            wi.message_timestamp, wi.status, wi.attachment_name, wi.attachment_mime,
+            (wi.attachment_url is not null) as has_attachment,
+            coalesce((wi.attachment_meta->'extraction'->>'text_len')::int, 0) as extracted_text_len,
+            -- حالة الاستخراج الحقيقية: صفرٌ في الطول لا يعني «ممسوح» بل قد يعني أنه لم يُجرَّب أو فشل
+            coalesce(wi.attachment_meta->'extraction'->>'status', 'absent') as extraction_status
+       from whatsapp_intake wi
+      where wi.status = any($1)
+        and not exists (select 1 from intake_analysis ia
+                         where ia.intake_id = wi.id and ia.analyzer = $2 and ia.analyzer_version = $3
+                           and ia.status = any($5))
+      order by wi.created_at asc limit $4`,
+    [INTAKE_REVIEWABLE_STATES, a, v, Math.min(Number(limit) || 20, 100), blocking]);
+  // لا نُخمّن نوع المستند: نعطي الحقائق ونترك الاستنتاج للمحلل
+  return rows.map((r) => Object.assign(r, {
+    extraction_ran: r.extraction_status !== "absent",
+    text_available: Number(r.extracted_text_len) > 0,
+  }));
+}
+
+/* نص المستند للمحلل — واجهة محدودة:
+   النص الخام لا يُخزَّن (يُمسح بعد التحليل حفاظاً على الخصوصية)، فنستخرجه عند الطلب
+   ولا نحفظه، ولا نكشف رابط المرفق الموقّع ولا أي حقل غير لازم. */
+async function analysisSource(client, intakeId, opts = {}) {
+  const row = (await client.query(
+    "select id, attachment_url, attachment_mime, attachment_name, original_message, attachment_meta from whatsapp_intake where id=$1",
+    [String(intakeId || "")])).rows[0];
+  if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+  const base = {
+    intake_id: row.id,
+    caption: row.original_message || "",
+    attachment_name: row.attachment_name || null,
+    attachment_mime: row.attachment_mime || null,
+    has_attachment: !!row.attachment_url,
+  };
+  if (!row.attachment_url) return Object.assign(base, { extraction_status: "no_attachment", text: "", text_len: 0 });
+  let proc;
+  try {
+    proc = typeof opts.processAttachment === "function"
+      ? await opts.processAttachment(row.attachment_url, row.attachment_mime)
+      : await processAttachment(row.attachment_url, row.attachment_mime);
+  } catch (e) {
+    return Object.assign(base, { extraction_status: "error", reason: String(e.message || "").slice(0, 120), text: "", text_len: 0 });
+  }
+  const text = String(proc?.text || "");
+  return Object.assign(base, {
+    extraction_status: proc?.status || "unknown",
+    reason: proc?.reason || null,
+    bytes: proc?.bytes || null,
+    content_type: proc?.contentType || null,
+    text_len: text.length,
+    text: text.slice(0, 20000),
+  });
+}
+
+// حفظ نتيجة التحليل. لا يلمس سجل الوارد إطلاقاً.
+async function saveAnalysis(client, payload, via) {
+  requireAnalysisTable(await analysisTableReady(client));
+  const intakeId = String(payload && payload.intake_id || "").trim();
+  if (!intakeId) { const e = new Error("intake_id مطلوب"); e.statusCode = 400; throw e; }
+  const a = sanitizeAnalysis(payload);
+  if (!a.analyzer || !a.analyzer_version) { const e = new Error("analyzer و analyzer_version مطلوبان"); e.statusCode = 400; throw e; }
+  const target = (await client.query("select id, status from whatsapp_intake where id=$1", [intakeId])).rows[0];
+  if (!target) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
+
+  const existing = (await client.query(
+    "select id, status, attempts from intake_analysis where intake_id=$1 and analyzer=$2 and analyzer_version=$3",
+    [intakeId, a.analyzer, a.analyzer_version])).rows[0];
+  if (existing && existing.status !== "failed") {
+    const e = new Error("يوجد تحليل محفوظ لهذا السجل بهذا الإصدار");
+    e.statusCode = 409; e.existingId = existing.id; throw e;
+  }
+
+  const vals = [JSON.stringify(a.fields), a.suggested_classification, a.missing_fields,
+    JSON.stringify(a.questions), JSON.stringify(a.alerts), JSON.stringify(a.items), a.items_count,
+    a.items_in_total, a.items_spent_total, a.items_returned_total, a.reported_total,
+    a.expenses_diff, a.expenses_match, a.opening_balance, a.closing_balance, a.expected_closing,
+    a.settlement_diff, a.settlement_status, a.attachment_kind, a.needs_vision, a.needs_excel, a.error, a.status];
+  const SET_COLS = `fields=$2::jsonb, suggested_classification=$3, missing_fields=$4, questions=$5::jsonb,
+         alerts=$6::jsonb, items=$7::jsonb, items_count=$8, items_in_total=$9, items_spent_total=$10,
+         items_returned_total=$11, reported_total=$12, expenses_diff=$13, expenses_match=$14,
+         opening_balance=$15, closing_balance=$16, expected_closing=$17, settlement_diff=$18,
+         settlement_status=$19, attachment_kind=$20, needs_vision=$21, needs_excel=$22, error=$23, status=$24`;
+  let row;
+  if (existing) {
+    // إعادة محاولة بعد فشل: نُحدّث الصف نفسه ونزيد عدّاد المحاولات، فلا يتكرر
+    row = (await client.query(
+      `update intake_analysis set ${SET_COLS}, attempts = attempts + 1, analyzed_at = now(), updated_at = now()
+       where id=$1 returning *`, [existing.id, ...vals])).rows[0];
+  } else {
+    try {
+      row = (await client.query(
+        `insert into intake_analysis
+           (intake_id, analyzer, analyzer_version, fields, suggested_classification, missing_fields,
+            questions, alerts, items, items_count, items_in_total, items_spent_total, items_returned_total,
+            reported_total, expenses_diff, expenses_match, opening_balance, closing_balance, expected_closing,
+            settlement_diff, settlement_status, attachment_kind, needs_vision, needs_excel, error, status, analyzed_at)
+         values ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26, now())
+         returning *`,
+        [intakeId, a.analyzer, a.analyzer_version, ...vals])).rows[0];
+    } catch (err) {
+      // سباق: محللان متزامنان على نفس الرسالة — الفهرس الفريد يحسمه، والثاني يُبلَّغ 409 لا 500
+      if (err.code === "23505") {
+        const other = (await client.query(
+          "select id from intake_analysis where intake_id=$1 and analyzer=$2 and analyzer_version=$3",
+          [intakeId, a.analyzer, a.analyzer_version])).rows[0];
+        const e = new Error("يوجد تحليل محفوظ لهذا السجل بهذا الإصدار");
+        e.statusCode = 409; e.existingId = other?.id; throw e;
+      }
+      throw err;
+    }
+  }
+  await logAgentAction(client, {
+    actorType: "agent", actorName: String(via || a.analyzer).slice(0, 40), agentRole: "accounting",
+    action: "intake.analysis", targetType: "whatsapp_intake", targetId: intakeId,
+    summary: `تحليل مراقب (${a.analyzer} ${a.analyzer_version}): ${a.status}` +
+      (a.items_count ? ` — ${a.items_count} بنداً` : "") + (a.suggested_classification ? ` — اقتراح: ${a.suggested_classification}` : "") +
+      (a.expenses_match === false ? ` — فرق المصروفات ${a.expenses_diff}` : "") +
+      (a.settlement_status === "mismatch" ? ` — فرق التسوية ${a.settlement_diff}` : ""),
+    afterState: { analysis_id: row.id, status: a.status, items_count: a.items_count,
+      expenses_match: a.expenses_match, settlement_status: a.settlement_status },
+  });
+  return { id: row.id, intake_id: intakeId, status: row.status, attempts: row.attempts,
+    items_count: row.items_count, expenses_match: row.expenses_match, expenses_diff: row.expenses_diff,
+    settlement_status: row.settlement_status, settlement_diff: row.settlement_diff, retried: !!existing };
+}
+
+async function listAnalysis(client, intakeId) {
+  if (!(await analysisTableReady(client))) return [];
+  const { rows } = await client.query(
+    `select id, analyzer, analyzer_version, status, fields, suggested_classification, missing_fields,
+            questions, alerts, items, items_count, items_in_total, items_spent_total, items_returned_total,
+            reported_total, expenses_diff, expenses_match, opening_balance, closing_balance, expected_closing,
+            settlement_diff, settlement_status, attachment_kind, needs_vision, needs_excel, error, attempts, analyzed_at
+       from intake_analysis where intake_id = $1 order by created_at desc`, [String(intakeId || "")]);
+  return rows;
+}
+// أحدث تحليل لكل سجل، لعرضه في صندوق الواتساب. يتحمّل غياب الجدول قبل الهجرة.
+async function latestAnalysisFor(client, ids) {
+  if (!ids.length || !(await analysisTableReady(client))) return {};
+  const { rows } = await client.query(
+    `select distinct on (intake_id) intake_id, analyzer, analyzer_version, status, suggested_classification,
+            missing_fields, questions, alerts, items_count, items_in_total, items_spent_total, items_returned_total,
+            reported_total, expenses_diff, expenses_match, settlement_status, settlement_diff, analyzed_at
+       from intake_analysis where intake_id = any($1) order by intake_id, created_at desc`, [ids]);
+  const map = {};
+  for (const r of rows) map[r.intake_id] = r;
+  return map;
+}
+
 /* ─── WhatsApp Intake Review (M2): صندوق واتساب + مراجعة بشرية ─── */
 
 function intakeRow(row) {
@@ -2467,7 +2760,10 @@ async function listIntake(client, { status } = {}) {
   let where = "";
   if (status) { params.push(status); where = "where wi.status = $1"; }
   const result = await client.query(`${INTAKE_SELECT} ${where} order by wi.created_at desc limit 200`, params);
-  return result.rows.map(intakeRow);
+  const rows = result.rows.map(intakeRow);
+  const analyses = await latestAnalysisFor(client, rows.map((r) => r.id));
+  for (const r of rows) r.analysis = analyses[r.id] || null;   // اقتراح المحلل، منفصل عن قرار المراجع
+  return rows;
 }
 
 async function getIntake(client, id) {
@@ -3377,6 +3673,33 @@ module.exports = async function handler(req, res) {
       if (!auth.ok && !(user && user.role === "owner")) return res.status(401).json({ ok: false, error: "غير مصرح" });
       return res.status(200).json({ ok: true, data: await reprocessIntake(client, req.body || {}) });
     }
+    // ── المحلل المراقب: قراءة ما يحتاج تحليلاً، وحفظ النتيجة فقط ──
+    if (req.method === "GET" && path === "/intake/analysis/queue") {
+      await requireAnalystRead(client, req, user);
+      return res.status(200).json({ ok: true, data: await analysisQueue(client,
+        { analyzer: query.analyzer, version: query.version, limit: query.limit,
+          includeSkipped: String(query.include_skipped || "") === "true" }) });
+    }
+    if (req.method === "GET" && path.startsWith("/intake/analysis/source/")) {
+      await requireAnalystRead(client, req, user);
+      return res.status(200).json({ ok: true, data: await analysisSource(client,
+        decodeURIComponent(path.slice("/intake/analysis/source/".length))) });
+    }
+    if (req.method === "POST" && path === "/intake/analysis") {
+      const auth = await checkAnalystAuth(client, req);
+      if (!auth.ok) return res.status(401).json({ ok: false, error: "غير مصرح" });
+      try {
+        return res.status(201).json({ ok: true, data: await saveAnalysis(client, req.body || {}, auth.via) });
+      } catch (e) {
+        if (e.statusCode === 409) return res.status(409).json({ ok: false, error: e.message, existingId: e.existingId });
+        throw e;
+      }
+    }
+    if (req.method === "GET" && path.startsWith("/intake/analysis/") && path !== "/intake/analysis/queue"
+        && !path.startsWith("/intake/analysis/source/")) {
+      await requireAnalystRead(client, req, user);
+      return res.status(200).json({ ok: true, data: await listAnalysis(client, decodeURIComponent(path.slice("/intake/analysis/".length))) });
+    }
     if (req.method === "GET" && path === "/intake") {
       requireIntakeApprover(user); // M2.5: القراءة أيضاً محصورة بـ owner/accountant
       return res.status(200).json({ ok: true, data: await listIntake(client, { status: query.status }) });
@@ -3832,6 +4155,10 @@ module.exports.__p21 = {
 module.exports.__auth = {
   hashLoginCode, verifyLoginCode, login, getUserFromToken, revokeSession, sessionCookie, clearSessionCookie, parseCookies,
   changeOwnPassword, validateNewPassword, MIN_PASSWORD_LEN,
+};
+module.exports.__analysis = {
+  sanitizeAnalysis, analysisQueue, analysisSource, saveAnalysis, listAnalysis, latestAnalysisFor,
+  checkAnalystAuth, requireAnalystRead, analysisTableReady, ANALYSIS_SCOPE,
 };
 module.exports.__reprocess = { reprocessIntake, applyVisionFields, listPendingVision, sanitizeVisionFields };
 module.exports.__cloudsync = { getPeachCursor, updatePeachCursor, checkIntakeAuth };
