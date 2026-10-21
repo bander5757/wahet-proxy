@@ -2426,6 +2426,42 @@ async function applyVisionFields(client, payload) {
 const ANALYSIS_SCOPE = "intake_analyze";
 const ANALYSIS_CLASSIFICATIONS = ["expense", "receipt", "internal_transfer", "custody", "refund", "operational_update", "unknown"];
 const ANALYSIS_ITEM_KINDS = ["expense", "funding", "advance", "collection", "return", "other"];
+// المؤسسة المستفيدة: قائمة مغلقة. الخادم يطبّق قاعدة الافتراضي عند غياب الاسم ولا يحسم التعارض.
+const ANALYSIS_ORGS = ["main", "secondary", "unresolved"];
+const ANALYSIS_ORG_SOURCES = ["explicit", "default", "conflict"];
+
+// تُعيد { organization, organization_source } دائماً، بقواعد صريحة:
+//  • لا اسم ⇒ main/default (قاعدة الرئيسية الافتراضية).
+//  • اسم صريح صالح ⇒ كما ورد، ومصدره explicit إلا إن صرّح المحلل بغيره.
+//  • تعارض ⇒ unresolved/conflict: الخادم لا يرجّح طرفاً.
+//  • قيمة غير معروفة أو مزيج متناقض (مثل default مع secondary) ⇒ unresolved/conflict لا main،
+//    حتى لا يُسكت الخطأ بنسبة الحركة إلى مؤسسة لم تُذكر.
+function resolveAnalysisOrg(f) {
+  const rawOrg = f.organization == null ? "" : String(f.organization).trim();
+  const rawSrc = f.organization_source == null ? "" : String(f.organization_source).trim();
+  const orgOk = ANALYSIS_ORGS.includes(rawOrg);
+  const srcOk = ANALYSIS_ORG_SOURCES.includes(rawSrc);
+  const conflict = { organization: "unresolved", organization_source: "conflict" };
+  if (rawOrg === "" && rawSrc === "") return { organization: "main", organization_source: "default" };
+  if (rawOrg !== "" && !orgOk) return conflict;
+  if (rawSrc !== "" && !srcOk) return conflict;
+  if (rawSrc === "conflict" || rawOrg === "unresolved") return conflict;
+  if (rawOrg === "") return rawSrc === "default" ? { organization: "main", organization_source: "default" } : conflict;
+  if (rawSrc === "default" && rawOrg !== "main") return conflict;      // «افتراضي» لا ينتج المؤسسة الثانية
+  return { organization: rawOrg, organization_source: srcOk ? rawSrc : "explicit" };
+}
+
+// معرّف السجل يُتحقَّق قبل أي استعلام: Postgres يرمي 22P02 على نص غير uuid فيظهر 500 بلا داعٍ.
+const ANALYSIS_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function requireIntakeUuid(intakeId) {
+  const id = String(intakeId ?? "").trim();
+  if (!ANALYSIS_UUID_RE.test(id)) {
+    const e = new Error("معرّف سجل الوارد غير صالح: يجب أن يكون UUID");
+    e.statusCode = 400;
+    throw e;
+  }
+  return id;
+}
 const ANALYSIS_ATTACHMENT_KINDS = ["none", "pdf_text", "pdf_scan", "image", "excel", "other"];
 const ANALYSIS_MAX_ITEMS = 500;
 
@@ -2480,6 +2516,7 @@ function sanitizeAnalysis(payload) {
   }
   if (/^\d{4}$/.test(String(f.from_iban_last4 || ""))) fields.from_iban_last4 = String(f.from_iban_last4);
   if (/^\d{4}$/.test(String(f.to_iban_last4 || ""))) fields.to_iban_last4 = String(f.to_iban_last4);
+  Object.assign(fields, resolveAnalysisOrg(f));
 
   const items = (Array.isArray(p.items) ? p.items : []).slice(0, ANALYSIS_MAX_ITEMS).map((raw) => {
     const it = raw && typeof raw === "object" ? raw : {};
@@ -2583,9 +2620,10 @@ async function analysisQueue(client, { analyzer, version, limit, includeSkipped 
    النص الخام لا يُخزَّن (يُمسح بعد التحليل حفاظاً على الخصوصية)، فنستخرجه عند الطلب
    ولا نحفظه، ولا نكشف رابط المرفق الموقّع ولا أي حقل غير لازم. */
 async function analysisSource(client, intakeId, opts = {}) {
+  const id = requireIntakeUuid(intakeId);
   const row = (await client.query(
     "select id, attachment_url, attachment_mime, attachment_name, original_message, attachment_meta from whatsapp_intake where id=$1",
-    [String(intakeId || "")])).rows[0];
+    [id])).rows[0];
   if (!row) { const e = new Error("سجل الوارد غير موجود"); e.statusCode = 404; throw e; }
   const base = {
     intake_id: row.id,
@@ -2617,8 +2655,7 @@ async function analysisSource(client, intakeId, opts = {}) {
 // حفظ نتيجة التحليل. لا يلمس سجل الوارد إطلاقاً.
 async function saveAnalysis(client, payload, via) {
   requireAnalysisTable(await analysisTableReady(client));
-  const intakeId = String(payload && payload.intake_id || "").trim();
-  if (!intakeId) { const e = new Error("intake_id مطلوب"); e.statusCode = 400; throw e; }
+  const intakeId = requireIntakeUuid(payload && payload.intake_id);
   const a = sanitizeAnalysis(payload);
   if (!a.analyzer || !a.analyzer_version) { const e = new Error("analyzer و analyzer_version مطلوبان"); e.statusCode = 400; throw e; }
   const target = (await client.query("select id, status from whatsapp_intake where id=$1", [intakeId])).rows[0];
@@ -2687,6 +2724,7 @@ async function saveAnalysis(client, payload, via) {
 }
 
 async function listAnalysis(client, intakeId) {
+  requireIntakeUuid(intakeId);
   if (!(await analysisTableReady(client))) return [];
   const { rows } = await client.query(
     `select id, analyzer, analyzer_version, status, fields, suggested_classification, missing_fields,

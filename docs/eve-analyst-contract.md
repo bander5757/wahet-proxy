@@ -99,7 +99,9 @@ x-analyst-token: ***
     "reference": "9120092600123456",   // 6–24 رقماً
     "from_iban_last4": "4266", "to_iban_last4": "9804",
     "counterparty": "", "bank": "", "site": "", "payer": "", "payee": "",
-    "custody_holder": "عمر", "description": ""
+    "custody_holder": "عمر", "description": "",
+    "organization": "main|secondary|unresolved",          // المؤسسة المستفيدة
+    "organization_source": "explicit|default|conflict"    // مصدر النسبة
   },
   "suggested_classification": "custody",   // من القائمة المغلقة فقط وإلا null
   //   expense | receipt | internal_transfer | custody | refund | operational_update | unknown
@@ -194,3 +196,27 @@ GET /api/app/intake/analysis/<intake_id>
 المطلوب عملياً أن يعتمد **بندر وعمر**: بندر owner فيعتمد، أما **عمر فدوره supervisor فلا يستطيع**.
 لم يُغيَّر شيء في هذه المهمة. الخيارات لاحقاً: منح عمر صلاحية دقيقة مثل `intake.review`
 على غرار `sales.review`، أو تغيير دوره إلى accountant (يمنحه صلاحيات مالية أوسع).
+
+
+## المؤسسة المستفيدة (مُقترح للمراجعة — غير منشور)
+
+حقلان داخل `fields`، فلا يحتاجان هجرة: العمود `fields` من نوع `jsonb` ويخزّن ما تمرّره القائمة
+البيضاء كما هو، وقد تحقّقنا من ذلك على staging.
+
+| الحالة | ما يُرسله المحلل | ما يخزّنه الخادم |
+|---|---|---|
+| الاسم غير مذكور | لا شيء (أو `organization_source: "default"`) | `main` / `default` |
+| «المؤسسة الرئيسية» صريحة | `main` + `explicit` | `main` / `explicit` |
+| «المؤسسة الثانية» صريحة | `secondary` + `explicit` | `secondary` / `explicit` |
+| تعليق يخالف المستند | `organization_source: "conflict"` | `unresolved` / `conflict` |
+
+قواعد الخادم (`resolveAnalysisOrg` في `api/app.js`):
+- الحقلان يُكتبان دائماً، فلا يوجد تحليل بلا نسبة معروفة المصدر.
+- قاعدة الرئيسية تُطبَّق عند غياب الاسم فقط، ويُسجَّل مصدرها `default` لا `explicit`،
+  ليعرف المراجع أن النسبة قرار نظام لا نصّ رسالة.
+- التعارض لا يُحسم على الخادم: أي `conflict` أو `unresolved` يبقى `unresolved/conflict`.
+- القيمة غير المعروفة أو المزيج المتناقض (`default` مع `secondary`) ⇒ `unresolved/conflict`،
+  لا `main`، حتى لا يُسكت الخطأ بنسبة الحركة إلى مؤسسة لم تُذكر.
+- المؤسسة لا تؤثر على التصنيف ولا على الإجماليات ولا على الحساب الدافع.
+
+الاختبارات: `node scripts/test-analysis-org.js` (19 اختباراً، دوال نقية بلا قاعدة بيانات).
