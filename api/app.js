@@ -3662,6 +3662,21 @@ module.exports = async function handler(req, res) {
     const token = req.headers["x-wahet-token"] || parseCookies(req.headers.cookie)[SESSION_COOKIE] || "";
     const user = await getUserFromToken(client, token);
 
+    /* ─── حارس مصادقة مركزي ───
+       أي مسار غير مذكور في القائمتين أدناه يتطلب جلسة مستخدم صالحة.
+       PUBLIC: مسارات الدخول/الخروج وتتحقق بنفسها.
+       MACHINE: تتحقق بنفسها من مفتاح خدمة (Peach/الوكلاء) عبر
+       checkIntakeAuth أو INTAKE_SECRET أو X-Sync-Token، فتتجاوز حارس الجلسة. */
+    const PUBLIC_PATHS = new Set(["/auth/login", "/auth/logout", "/auth/me"]);
+    const MACHINE_AUTH_PATHS = new Set([
+      "/intake/whatsapp", "/intake/parse", "/intake/reprocess", "/intake/analysis",
+      "/intake/vision-fields", "/intake/pending-vision", "/intake/peach-cursor",
+      "/sales/inbound",
+    ]);
+    if (!user && !PUBLIC_PATHS.has(path) && !MACHINE_AUTH_PATHS.has(path)) {
+      return res.status(401).json({ ok: false, error: "لا توجد جلسة صالحة" });
+    }
+
     if (req.method === "POST" && path === "/auth/login") {
       const r = await login(client, req.body || {});
       res.setHeader("Set-Cookie", sessionCookie(r.token, r.persistent));
