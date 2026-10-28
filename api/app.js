@@ -118,10 +118,13 @@ const DOC_TYPE_LABELS = Object.fromEntries(Object.entries(DOC_TYPE_MAP).map(([la
 
 const VEHICLE_TASK_MAP = {
   "تغيير زيت": "oil_change",
+  "تغيير الزيت": "oil_change",
   "فحص": "inspection",
+  "فحص دوري": "inspection",
   "تأمين": "insurance",
   "استمارة": "registration",
   "صيانة": "maintenance",
+  "صيانة دورية": "maintenance",
   "أخرى": "other",
 };
 const VEHICLE_TASK_LABELS = Object.fromEntries(Object.entries(VEHICLE_TASK_MAP).map(([label, key]) => [key, label]));
@@ -350,13 +353,25 @@ function staffDocRow(row) {
 }
 
 function vehicleTaskRow(row) {
+  let meta = {};
+  const notes = String(row.notes || "");
+  if (notes.trim().startsWith("{")) {
+    try { meta = JSON.parse(notes); } catch (_) { meta = {}; }
+  }
   return {
     id: row.id,
     vehicleId: row.vehicle_id,
     name: row.vehicle_name,
     type: VEHICLE_TASK_LABELS[row.task_type] || row.task_type,
     due: row.due_on,
-    odometer: row.due_odometer ? String(row.due_odometer) : row.notes || "",
+    odometer: meta.note || (!notes.trim().startsWith("{") ? notes : ""),
+    alertBasis: meta.alertBasis || (row.due_odometer ? "odometer" : "date"),
+    dueOdometer: row.due_odometer || meta.dueOdometer || null,
+    lastOdometer: meta.lastOdometer || null,
+    lastReadingDate: meta.lastReadingDate || "",
+    dailyKm: meta.dailyKm || null,
+    alertBeforeKm: meta.alertBeforeKm || 500,
+    vehicleMeta: notes.trim().startsWith("{") ? notes : "",
     attachment: row.attachment_name || "",
   };
 }
@@ -967,24 +982,69 @@ async function requireVehicle(client, name) {
 
 async function createVehicleTask(client, payload) {
   const name = String(payload.name || "").trim();
-  const type = VEHICLE_TASK_MAP[payload.type] || payload.task_type;
+  const type = VEHICLE_TASK_MAP[payload.type] || payload.task_type || "other";
   const due = String(payload.due || payload.due_on || "").trim();
-  if (!name || !type || !due) {
-    const err = new Error("اسم السيارة ونوع التنبيه وتاريخ الاستحقاق مطلوبة");
+  const odometerValue = Number(String(payload.dueOdometer || payload.due_odometer || payload.odometer || "").replace(/[^\d]/g, ""));
+  const hasNumericOdometer = Number.isFinite(odometerValue) && odometerValue > 0;
+  if (!name || !type || (!due && !hasNumericOdometer)) {
+    const err = new Error("اسم السيارة ونوع التنبيه وتاريخ أو عداد الاستحقاق مطلوبة");
     err.statusCode = 400;
     throw err;
   }
   const vehicleId = await requireVehicle(client, name);
-  const odometerValue = Number(String(payload.odometer || "").replace(/[^\d]/g, ""));
-  const hasNumericOdometer = Number.isFinite(odometerValue) && odometerValue > 0;
+  const meta = {
+    alertBasis: payload.alertBasis || (hasNumericOdometer && !due ? "odometer" : hasNumericOdometer ? "both" : "date"),
+    dueOdometer: hasNumericOdometer ? odometerValue : null,
+    lastOdometer: Number(payload.lastOdometer) > 0 ? Number(payload.lastOdometer) : null,
+    lastReadingDate: String(payload.lastReadingDate || "").trim(),
+    dailyKm: Number(payload.dailyKm) > 0 ? Number(payload.dailyKm) : null,
+    alertBeforeKm: Number(payload.alertBeforeKm) > 0 ? Number(payload.alertBeforeKm) : 500,
+    note: String(payload.odometer || payload.note || "").trim(),
+  };
   const result = await client.query(
     `insert into vehicle_tasks (vehicle_id, task_type, due_on, due_odometer, notes)
      values ($1, $2, $3, $4, $5)
      returning id, vehicle_id, task_type, due_on::text, due_odometer, notes`,
-    [vehicleId, type, due, hasNumericOdometer ? odometerValue : null, hasNumericOdometer ? null : payload.odometer || null]
+    [vehicleId, type, due || null, hasNumericOdometer ? odometerValue : null, JSON.stringify(meta)]
   );
   await saveAttachment(client, "vehicle", result.rows[0].id, payload.attachment, payload.mime_type);
   return { ...vehicleTaskRow({ ...result.rows[0], vehicle_name: name }), attachment: String(payload.attachment || "") };
+}
+
+async function updateVehicleTask(client, payload) {
+  const id = String(payload.id || "").trim();
+  const type = VEHICLE_TASK_MAP[payload.type] || payload.task_type || "other";
+  const due = String(payload.due || payload.due_on || "").trim();
+  const odometerValue = Number(String(payload.dueOdometer || payload.due_odometer || payload.odometer || "").replace(/[^\d]/g, ""));
+  const hasNumericOdometer = Number.isFinite(odometerValue) && odometerValue > 0;
+  if (!id || !type || (!due && !hasNumericOdometer)) {
+    const err = new Error("معرف التنبيه وتاريخ أو عداد الاستحقاق مطلوبة");
+    err.statusCode = 400;
+    throw err;
+  }
+  const meta = {
+    alertBasis: payload.alertBasis || (hasNumericOdometer && !due ? "odometer" : hasNumericOdometer ? "both" : "date"),
+    dueOdometer: hasNumericOdometer ? odometerValue : null,
+    lastOdometer: Number(payload.lastOdometer) > 0 ? Number(payload.lastOdometer) : null,
+    lastReadingDate: String(payload.lastReadingDate || "").trim(),
+    dailyKm: Number(payload.dailyKm) > 0 ? Number(payload.dailyKm) : null,
+    alertBeforeKm: Number(payload.alertBeforeKm) > 0 ? Number(payload.alertBeforeKm) : 500,
+    note: String(payload.odometer || payload.note || "").trim(),
+  };
+  const result = await client.query(
+    `update vehicle_tasks
+     set task_type = $2, due_on = $3, due_odometer = $4, notes = $5
+     where id = $1 and status = 'open'
+     returning id, vehicle_id, task_type, due_on::text, due_odometer, notes`,
+    [id, type, due || null, hasNumericOdometer ? odometerValue : null, JSON.stringify(meta)]
+  );
+  if (!result.rows[0]) {
+    const err = new Error("تنبيه السيارة غير موجود");
+    err.statusCode = 404;
+    throw err;
+  }
+  const vehicle = await client.query("select name from vehicles where id = $1", [result.rows[0].vehicle_id]);
+  return vehicleTaskRow({ ...result.rows[0], vehicle_name: vehicle.rows[0]?.name || "" });
 }
 
 async function deleteVehicleTask(client, id) {
@@ -2427,6 +2487,17 @@ const ANALYSIS_SCOPE = "intake_analyze";
 const ANALYSIS_CLASSIFICATIONS = ["expense", "receipt", "internal_transfer", "custody", "refund", "operational_update", "unknown"];
 const ANALYSIS_ITEM_KINDS = ["expense", "funding", "advance", "collection", "return", "other"];
 // المؤسسة المستفيدة: قائمة مغلقة. الخادم يطبّق قاعدة الافتراضي عند غياب الاسم ولا يحسم التعارض.
+// معرّف السجل يُتحقَّق قبل أي استعلام: Postgres يرمي 22P02 على نص غير uuid فيظهر 500 بلا داعٍ.
+const ANALYSIS_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function requireIntakeUuid(intakeId) {
+  const id = String(intakeId ?? "").trim();
+  if (!ANALYSIS_UUID_RE.test(id)) {
+    const e = new Error("معرّف سجل الوارد غير صالح: يجب أن يكون UUID");
+    e.statusCode = 400;
+    throw e;
+  }
+  return id;
+}
 const ANALYSIS_ORGS = ["main", "secondary", "unresolved"];
 const ANALYSIS_ORG_SOURCES = ["explicit", "default", "conflict"];
 
@@ -2449,18 +2520,6 @@ function resolveAnalysisOrg(f) {
   if (rawOrg === "") return rawSrc === "default" ? { organization: "main", organization_source: "default" } : conflict;
   if (rawSrc === "default" && rawOrg !== "main") return conflict;      // «افتراضي» لا ينتج المؤسسة الثانية
   return { organization: rawOrg, organization_source: srcOk ? rawSrc : "explicit" };
-}
-
-// معرّف السجل يُتحقَّق قبل أي استعلام: Postgres يرمي 22P02 على نص غير uuid فيظهر 500 بلا داعٍ.
-const ANALYSIS_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function requireIntakeUuid(intakeId) {
-  const id = String(intakeId ?? "").trim();
-  if (!ANALYSIS_UUID_RE.test(id)) {
-    const e = new Error("معرّف سجل الوارد غير صالح: يجب أن يكون UUID");
-    e.statusCode = 400;
-    throw e;
-  }
-  return id;
 }
 const ANALYSIS_ATTACHMENT_KINDS = ["none", "pdf_text", "pdf_scan", "image", "excel", "other"];
 const ANALYSIS_MAX_ITEMS = 500;
@@ -3864,6 +3923,10 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "POST" && path === "/vehicle-tasks") {
       return res.status(201).json({ ok: true, data: await createVehicleTask(client, req.body || {}) });
+    }
+
+    if (req.method === "POST" && path === "/vehicle-tasks/update") {
+      return res.status(200).json({ ok: true, data: await updateVehicleTask(client, req.body || {}) });
     }
 
     if (req.method === "POST" && path === "/vehicle-tasks/delete") {

@@ -677,7 +677,7 @@
           <div style="font-size:15px;font-weight:600">السيارات والصيانة</div>
           <div style="font-size:11px;color:#9a9898;margin-top:2px">زيت، فحص، تأمين، استمارة وصيانة</div>
         </div>
-        <button class="btn-secondary" data-action="assetManage" onclick="document.getElementById('vehicle-new-modal').style.display='flex'">+ سيارة</button>
+        <button class="btn-secondary" data-action="assetManage" onclick="openNewVehicleModal()">+ سيارة</button>
       </div>
       <div id="vehicle-alerts"></div>
     </div>
@@ -691,9 +691,15 @@
     <input type="hidden" id="edit-veh-id">
     <div class="grid-2" style="gap:10px;margin-bottom:12px">
       <div><div class="label">اسم السيارة</div><input id="edit-veh-name" type="text" readonly style="background:var(--surface-2);color:var(--text-3)"></div>
-      <div><div class="label">نوع التنبيه</div><select id="edit-veh-type"><option>استمارة</option><option>تأمين</option><option>فحص دوري</option><option>تفويض</option><option>صيانة دورية</option><option>تغيير الزيت</option><option>كفرات</option><option>رخصة نقل</option><option>بطاقة تشغيل</option><option>أخرى</option></select></div>
-      <div><div class="label">تاريخ الاستحقاق / الانتهاء</div><input id="edit-veh-due" type="date"></div>
-      <div><div class="label">ملاحظة (عداد/تفاصيل)</div><input id="edit-veh-odometer" type="text" placeholder="مثال: كل 5,000 كم"></div>
+      <div><div class="label">نوع التنبيه</div><select id="edit-veh-type" onchange="onVehicleTypeChange('edit')"><option>استمارة</option><option>تأمين</option><option>فحص دوري</option><option>تفويض</option><option>صيانة دورية</option><option>تغيير الزيت</option><option>كفرات</option><option>رخصة نقل</option><option>بطاقة تشغيل</option><option>أخرى</option></select></div>
+      <div><div class="label">طريقة التنبيه</div><select id="edit-veh-basis" onchange="onVehicleAlertBasisChange('edit')"><option value="date">تاريخ</option><option value="odometer">عداد</option><option value="both">تاريخ وعداد</option></select></div>
+      <div class="veh-date-field-edit"><div class="label">تاريخ الاستحقاق / الانتهاء</div><input id="edit-veh-due" type="date"></div>
+      <div class="veh-odo-field-edit"><div class="label">عداد الاستحقاق</div><input id="edit-veh-due-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 125000"></div>
+      <div class="veh-odo-field-edit"><div class="label">آخر قراءة عداد</div><input id="edit-veh-last-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 120500"></div>
+      <div class="veh-odo-field-edit"><div class="label">تاريخ آخر قراءة</div><input id="edit-veh-last-date" type="date"></div>
+      <div class="veh-odo-field-edit"><div class="label">متوسط كم يومي</div><input id="edit-veh-daily-km" inputmode="decimal" type="number" min="0" step="1" placeholder="مثال: 80"></div>
+      <div class="veh-odo-field-edit"><div class="label">التنبيه قبل كم</div><input id="edit-veh-alert-km" inputmode="numeric" type="number" min="0" placeholder="مثال: 500"></div>
+      <div style="grid-column:1/-1"><div class="label">ملاحظة</div><input id="edit-veh-odometer" type="text" placeholder="اختياري"></div>
     </div>
     <div class="flex gap-8">
       <button class="btn-primary" onclick="saveEditVehicleDoc()">حفظ التعديل</button>
@@ -710,8 +716,14 @@
     <div class="grid-2" style="gap:10px;margin-bottom:12px">
       <div style="grid-column:1/-1"><div class="label">نوع التنبيه أو المستند</div><select id="add-veh-type" onchange="onAddVehTypeChange()"><option>استمارة</option><option>تأمين</option><option>فحص دوري</option><option>تفويض</option><option>صيانة دورية</option><option>تغيير الزيت</option><option>كفرات</option><option>رخصة نقل</option><option>بطاقة تشغيل</option><option>مخالفة</option><option>عقد إيجار</option><option>أخرى</option></select></div>
       <div id="add-veh-custom-row" style="display:none;grid-column:1/-1"><div class="label">اسم التنبيه المخصص</div><input id="add-veh-custom-type" type="text" placeholder="مثال: رخصة نقل ثقيل"></div>
-      <div><div class="label">تاريخ الاستحقاق / الانتهاء</div><input id="add-veh-due" type="date"></div>
-      <div><div class="label">ملاحظة</div><input id="add-veh-odometer" type="text" placeholder="اختياري"></div>
+      <div><div class="label">طريقة التنبيه</div><select id="add-veh-basis" onchange="onVehicleAlertBasisChange('add')"><option value="date">تاريخ</option><option value="odometer">عداد</option><option value="both">تاريخ وعداد</option></select></div>
+      <div class="veh-date-field-add"><div class="label">تاريخ الاستحقاق / الانتهاء</div><input id="add-veh-due" type="date"></div>
+      <div class="veh-odo-field-add"><div class="label">عداد الاستحقاق</div><input id="add-veh-due-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 125000"></div>
+      <div class="veh-odo-field-add"><div class="label">آخر قراءة عداد</div><input id="add-veh-last-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 120500"></div>
+      <div class="veh-odo-field-add"><div class="label">تاريخ آخر قراءة</div><input id="add-veh-last-date" type="date"></div>
+      <div class="veh-odo-field-add"><div class="label">متوسط كم يومي</div><input id="add-veh-daily-km" inputmode="decimal" type="number" min="0" step="1" placeholder="مثال: 80"></div>
+      <div class="veh-odo-field-add"><div class="label">التنبيه قبل كم</div><input id="add-veh-alert-km" inputmode="numeric" type="number" min="0" placeholder="مثال: 500"></div>
+      <div style="grid-column:1/-1"><div class="label">ملاحظة</div><input id="add-veh-odometer" type="text" placeholder="اختياري"></div>
     </div>
     <div class="flex gap-8">
       <button class="btn-primary" onclick="saveAddVehicleDocModal()">حفظ</button>
@@ -726,8 +738,14 @@
     <div class="staff-modal-title">🚗 إضافة سيارة جديدة</div>
     <div class="grid-2" style="gap:10px;margin-bottom:12px">
       <div style="grid-column:1/-1"><div class="label">اسم السيارة أو رقم اللوحة</div><input id="new-veh-name" type="text" placeholder="مثال: سيارة التركيب — أ ب ج 1234"></div>
-      <div><div class="label">نوع التنبيه الأول</div><select id="new-veh-type"><option>استمارة</option><option>تأمين</option><option>فحص دوري</option><option>تفويض</option><option>صيانة دورية</option><option>تغيير الزيت</option><option>أخرى</option></select></div>
-      <div><div class="label">تاريخ الاستحقاق</div><input id="new-veh-due" type="date"></div>
+      <div><div class="label">نوع التنبيه الأول</div><select id="new-veh-type" onchange="onVehicleTypeChange('new')"><option>استمارة</option><option>تأمين</option><option>فحص دوري</option><option>تفويض</option><option>صيانة دورية</option><option>تغيير الزيت</option><option>أخرى</option></select></div>
+      <div><div class="label">طريقة التنبيه</div><select id="new-veh-basis" onchange="onVehicleAlertBasisChange('new')"><option value="date">تاريخ</option><option value="odometer">عداد</option><option value="both">تاريخ وعداد</option></select></div>
+      <div class="veh-date-field-new"><div class="label">تاريخ الاستحقاق</div><input id="new-veh-due" type="date"></div>
+      <div class="veh-odo-field-new"><div class="label">عداد الاستحقاق</div><input id="new-veh-due-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 125000"></div>
+      <div class="veh-odo-field-new"><div class="label">آخر قراءة عداد</div><input id="new-veh-last-odometer" inputmode="numeric" type="number" min="0" placeholder="مثال: 120500"></div>
+      <div class="veh-odo-field-new"><div class="label">تاريخ آخر قراءة</div><input id="new-veh-last-date" type="date"></div>
+      <div class="veh-odo-field-new"><div class="label">متوسط كم يومي</div><input id="new-veh-daily-km" inputmode="decimal" type="number" min="0" step="1" placeholder="مثال: 80"></div>
+      <div class="veh-odo-field-new"><div class="label">التنبيه قبل كم</div><input id="new-veh-alert-km" inputmode="numeric" type="number" min="0" placeholder="مثال: 500"></div>
       <div style="grid-column:1/-1"><div class="label">ملاحظة</div><input id="new-veh-odometer" type="text" placeholder="اختياري"></div>
     </div>
     <div class="flex gap-8">
@@ -4348,7 +4366,7 @@ function renderExecutive() {
   const upcomingInstalls  = clients.filter(c => daysUntil(c.installDate) !== null && daysUntil(c.installDate) >= 0).sort((a,b)=>new Date(a.installDate)-new Date(b.installDate)).slice(0,5);
   const draftCount        = draftFinanceEntries().length;
   const urgentStaff       = staffDocs.filter(x => { const d = daysUntil(x.expires); return d !== null && d <= 15; });
-  const urgentVehicles    = vehicles.filter(x => { const d = daysUntil(x.due); return d !== null && d <= 15; });
+  const urgentVehicles    = vehicles.filter(x => vehicleAlertStatus(x).level >= 1);
 
   /* بطاقات KPI الأربع الجديدة */
   const kpiCards = [
@@ -4390,10 +4408,11 @@ function renderExecutive() {
     .filter(x => { const d = daysUntil(x.expires); return d !== null && d <= 15; })
     .map(x => ({ key: x.id, name: x.name, sub: x.type, date: x.expires, dateField: 'expires', kind: 'staff', editFn: `openEditStaffDoc('${htmlEscape(x.id)}')` }));
   const urgentVehItems = vehicles
-    .filter(x => { const d = daysUntil(x.due); return d !== null && d <= 15; })
-    .map(x => ({ key: x.id, name: x.name, sub: x.type, date: x.due, dateField: 'due', kind: 'veh', editFn: `openEditVehicleDoc('${htmlEscape(x.id)}')` }));
+    .map(x => ({ ...x, status: vehicleAlertStatus(x) }))
+    .filter(x => x.status.level >= 1)
+    .map(x => ({ key: x.id, name: x.name, sub: x.type, date: x.status.sortDate, status: x.status, dateField: 'due', kind: 'veh', editFn: `openEditVehicleDoc('${htmlEscape(x.id)}')` }));
   const urgentAll = [...urgentStaffItems, ...urgentVehItems]
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+    .sort((a, b) => (b.status?.level || 0) - (a.status?.level || 0) || new Date(a.date) - new Date(b.date));
   const urgentAlertCard = urgentAll.length ? `
     <div class="urgent-alerts-card" style="margin-bottom:14px">
       <div class="urgent-alerts-header">
@@ -4402,16 +4421,16 @@ function renderExecutive() {
       </div>
       <div class="urgent-alerts-list">
         ${urgentAll.map(x => {
-          const d = x.kind === 'staff' ? daysUntil(x.date) : daysUntil(x.date);
-          const label = d < 0 ? 'منتهي منذ ' + Math.abs(d) + ' يوم' : d === 0 ? 'ينتهي اليوم' : d === 1 ? 'باقي يوم واحد' : 'باقي ' + d + ' يوم';
-          const pillColor = d <= 0 ? '#b91c1c' : '#EF9F27';
+          const d = x.kind === 'staff' ? daysUntil(x.date) : null;
+          const label = x.kind === 'veh' ? x.status.label : d < 0 ? 'منتهي منذ ' + Math.abs(d) + ' يوم' : d === 0 ? 'ينتهي اليوم' : d === 1 ? 'باقي يوم واحد' : 'باقي ' + d + ' يوم';
+          const pillColor = x.kind === 'veh' ? x.status.color : d <= 0 ? '#b91c1c' : '#EF9F27';
           const kindBadge = x.kind === 'staff'
             ? `<span style="font-size:10px;background:var(--navy-light);color:var(--navy);border-radius:6px;padding:1px 5px">موظف</span>`
             : `<span style="font-size:10px;background:var(--green-bg);color:var(--green);border-radius:6px;padding:1px 5px">سيارة</span>`;
           return `<div class="urgent-alert-row">
             <div style="flex:1;min-width:0">
               <div class="urgent-alert-doc" style="display:flex;align-items:center;gap:5px">${htmlEscape(x.name)} ${kindBadge}</div>
-              <div class="urgent-alert-sub">${htmlEscape(x.sub)} — ${x.date || ''}</div>
+              <div class="urgent-alert-sub">${htmlEscape(x.sub)}${x.kind === 'staff' && x.date ? ' — ' + x.date : ''}</div>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
               ${statusPill(label, pillColor)}
@@ -5003,6 +5022,153 @@ const VEHICLE_SLOT_ALIASES = {
   'تأمين': ['تأمين'],
 };
 
+function numberOrNull(value) {
+  const n = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function vehicleMetaFromDoc(doc = {}) {
+  let parsed = {};
+  const raw = String(doc.vehicleMeta || doc.meta || doc.noteMeta || '');
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch(e) {}
+  }
+  if (!raw && typeof doc.odometer === 'string' && doc.odometer.trim().startsWith('{')) {
+    try { parsed = JSON.parse(doc.odometer); } catch(e) {}
+  }
+  const dueOdometer = numberOrNull(doc.dueOdometer ?? doc.due_odometer ?? parsed.dueOdometer);
+  const legacyNumericOdo = numberOrNull(doc.odometer);
+  const type = doc.type || '';
+  const basis = doc.alertBasis || parsed.alertBasis || (dueOdometer || (legacyNumericOdo && !doc.due) ? 'odometer' : type.includes('زيت') ? 'odometer' : 'date');
+  return {
+    alertBasis: basis,
+    dueOdometer: dueOdometer || (basis !== 'date' ? legacyNumericOdo : null),
+    lastOdometer: numberOrNull(doc.lastOdometer ?? parsed.lastOdometer),
+    lastReadingDate: doc.lastReadingDate || parsed.lastReadingDate || '',
+    dailyKm: numberOrNull(doc.dailyKm ?? parsed.dailyKm),
+    alertBeforeKm: numberOrNull(doc.alertBeforeKm ?? parsed.alertBeforeKm) || 500,
+    note: doc.note || parsed.note || (typeof doc.odometer === 'string' && !doc.odometer.trim().startsWith('{') ? doc.odometer : ''),
+  };
+}
+
+function vehicleMetaNote(meta, plainNote = '') {
+  return JSON.stringify({
+    alertBasis: meta.alertBasis || 'date',
+    dueOdometer: numberOrNull(meta.dueOdometer),
+    lastOdometer: numberOrNull(meta.lastOdometer),
+    lastReadingDate: meta.lastReadingDate || '',
+    dailyKm: numberOrNull(meta.dailyKm),
+    alertBeforeKm: numberOrNull(meta.alertBeforeKm) || 500,
+    note: plainNote || '',
+  });
+}
+
+function vehicleEstimatedOdometer(meta) {
+  if (!meta.lastOdometer) return null;
+  const lastDate = meta.lastReadingDate ? new Date(meta.lastReadingDate + 'T00:00:00') : null;
+  if (!lastDate || !meta.dailyKm) return meta.lastOdometer;
+  const days = Math.max(0, Math.floor((new Date() - lastDate) / 86400000));
+  return Math.round(meta.lastOdometer + (days * meta.dailyKm));
+}
+
+function vehicleAlertStatus(doc = {}) {
+  const meta = vehicleMetaFromDoc(doc);
+  const basis = meta.alertBasis || 'date';
+  const statuses = [];
+  if ((basis === 'date' || basis === 'both') && doc.due) {
+    const d = daysUntil(doc.due);
+    if (d !== null) {
+      statuses.push({
+        level: d <= 0 ? 3 : d <= 15 ? 2 : d <= 30 ? 1 : 0,
+        label: d < 0 ? 'متأخر ' + Math.abs(d) + ' يوم' : d === 0 ? 'اليوم' : 'بعد ' + d + ' يوم',
+        color: d <= 0 ? '#b91c1c' : d <= 15 ? '#EF9F27' : d <= 30 ? '#92650a' : '#1a6b3f',
+        sortDate: doc.due,
+      });
+    }
+  }
+  if ((basis === 'odometer' || basis === 'both') && meta.dueOdometer) {
+    const current = vehicleEstimatedOdometer(meta);
+    if (!current) {
+      statuses.push({ level: 2, label: 'أدخل آخر قراءة', color: '#EF9F27', sortDate: doc.due || '2999-12-31' });
+    } else {
+      const remaining = Math.round(meta.dueOdometer - current);
+      const staleDays = meta.lastReadingDate ? Math.floor((new Date() - new Date(meta.lastReadingDate + 'T00:00:00')) / 86400000) : null;
+      const stale = staleDays !== null && staleDays > 7;
+      statuses.push({
+        level: remaining <= 0 ? 3 : remaining <= meta.alertBeforeKm ? 2 : stale ? 1 : 0,
+        label: remaining <= 0 ? 'متجاوز ' + Math.abs(remaining).toLocaleString() + ' كم' : 'متبقي ' + remaining.toLocaleString() + ' كم',
+        color: remaining <= 0 ? '#b91c1c' : remaining <= meta.alertBeforeKm ? '#EF9F27' : stale ? '#92650a' : '#1a6b3f',
+        sortDate: doc.due || '2999-12-31',
+      });
+      if (stale) {
+        statuses.push({ level: 1, label: 'تحديث قراءة مطلوب', color: '#92650a', sortDate: doc.due || '2999-12-31' });
+      }
+    }
+  }
+  if (!statuses.length) return { level: 1, label: 'بيانات ناقصة', color: '#6b7a99', sortDate: doc.due || '2999-12-31', meta };
+  const primary = statuses.slice().sort((a, b) => b.level - a.level)[0];
+  return { ...primary, extra: statuses.filter(s => s !== primary), meta };
+}
+
+function fillVehicleMeta(prefix, doc = {}) {
+  const meta = vehicleMetaFromDoc(doc);
+  const set = (id, value) => { const el = document.getElementById(`${prefix}-veh-${id}`); if (el) el.value = value || ''; };
+  set('basis', meta.alertBasis || 'date');
+  set('due-odometer', meta.dueOdometer || '');
+  set('last-odometer', meta.lastOdometer || '');
+  set('last-date', meta.lastReadingDate || '');
+  set('daily-km', meta.dailyKm || '');
+  set('alert-km', meta.alertBeforeKm || 500);
+  set('odometer', meta.note || '');
+  const basisEl = document.getElementById(`${prefix}-veh-basis`);
+  if (basisEl) basisEl.dataset.autoOil = 'done';
+  onVehicleAlertBasisChange(prefix);
+}
+
+function collectVehicleMeta(prefix) {
+  const val = id => document.getElementById(`${prefix}-veh-${id}`)?.value || '';
+  const meta = {
+    alertBasis: val('basis') || 'date',
+    dueOdometer: numberOrNull(val('due-odometer')),
+    lastOdometer: numberOrNull(val('last-odometer')),
+    lastReadingDate: val('last-date'),
+    dailyKm: numberOrNull(val('daily-km')),
+    alertBeforeKm: numberOrNull(val('alert-km')) || 500,
+  };
+  return { meta, note: val('odometer').trim() };
+}
+
+function onVehicleAlertBasisChange(prefix) {
+  const typeEl = document.getElementById(`${prefix}-veh-type`);
+  const basisEl = document.getElementById(`${prefix}-veh-basis`);
+  if (!basisEl) return;
+  if (typeEl && typeEl.value.includes('زيت') && basisEl.dataset.autoOil !== 'done') {
+    basisEl.value = 'odometer';
+    basisEl.dataset.autoOil = 'done';
+  }
+  const basis = basisEl.value || 'date';
+  document.querySelectorAll(`.veh-date-field-${prefix}`).forEach(el => el.style.display = (basis === 'date' || basis === 'both') ? '' : 'none');
+  document.querySelectorAll(`.veh-odo-field-${prefix}`).forEach(el => el.style.display = (basis === 'odometer' || basis === 'both') ? '' : 'none');
+}
+
+function onVehicleTypeChange(prefix) {
+  const typeEl = document.getElementById(`${prefix}-veh-type`);
+  const basisEl = document.getElementById(`${prefix}-veh-basis`);
+  if (basisEl && typeEl?.value.includes('زيت')) {
+    basisEl.value = 'odometer';
+    basisEl.dataset.autoOil = 'done';
+  }
+  onVehicleAlertBasisChange(prefix);
+}
+
+function validateVehicleAlertInput(prefix, due) {
+  const { meta } = collectVehicleMeta(prefix);
+  if ((meta.alertBasis === 'date' || meta.alertBasis === 'both') && !due) return 'أدخل تاريخ الاستحقاق';
+  if ((meta.alertBasis === 'odometer' || meta.alertBasis === 'both') && !meta.dueOdometer) return 'أدخل عداد الاستحقاق';
+  if ((meta.alertBasis === 'odometer' || meta.alertBasis === 'both') && meta.lastOdometer && meta.dueOdometer && meta.lastOdometer > meta.dueOdometer) return 'آخر قراءة أعلى من عداد الاستحقاق';
+  return '';
+}
+
 function vehSlotFind(vehicleDocs, slotType) {
   const aliases = VEHICLE_SLOT_ALIASES[slotType] || [slotType];
   return vehicleDocs.find(d => aliases.includes(d.type));
@@ -5026,7 +5192,7 @@ function openEditVehicleDoc(id) {
   const canon = DEFAULT_VEHICLE_TYPES.find(k => (VEHICLE_SLOT_ALIASES[k]||[k]).includes(doc.type)) || doc.type;
   sel.value = [...sel.options].find(o => o.value === canon || o.value === doc.type) ? (canon || doc.type) : doc.type;
   document.getElementById('edit-veh-due').value = doc.due || '';
-  document.getElementById('edit-veh-odometer').value = doc.odometer || '';
+  fillVehicleMeta('edit', doc);
   document.getElementById('vehicle-edit-modal').style.display = 'flex';
 }
 
@@ -5038,11 +5204,23 @@ async function saveEditVehicleDoc() {
   const id = document.getElementById('edit-veh-id').value;
   const type = document.getElementById('edit-veh-type').value;
   const due = document.getElementById('edit-veh-due').value;
-  const odometer = document.getElementById('edit-veh-odometer').value.trim();
+  const error = validateVehicleAlertInput('edit', due);
+  if (error) { alert(error); return; }
+  const { meta, note } = collectVehicleMeta('edit');
+  const odometer = note;
   const idx = vehicles.findIndex(x => x.id === id);
   if (idx === -1) return;
-  vehicles[idx] = { ...vehicles[idx], type, due, odometer };
+  vehicles[idx] = { ...vehicles[idx], type, due, odometer, ...meta };
   saveVehicles();
+  if (apiOnline && id && !id.startsWith('vehicle_') && !id.startsWith('vehicle_seed_')) {
+    try {
+      const res = await apiRequest('/vehicle-tasks/update', { method: 'POST', body: JSON.stringify({ id, type, due, odometer, ...meta }) });
+      vehicles[idx] = res.data;
+      saveVehicles();
+    } catch(e) {
+      showMsg('⚠️ تم الحفظ محلياً، وتعذر تحديث قاعدة البيانات');
+    }
+  }
   closeEditVehicleDoc();
   showMsg('✅ تم تحديث تنبيه السيارة');
   render();
@@ -5067,7 +5245,7 @@ function openAddVehicleDocModal(vehName, type) {
   document.getElementById('add-veh-name-display').textContent = vehName;
   document.getElementById('add-veh-type').value = type || 'استمارة';
   document.getElementById('add-veh-due').value = '';
-  document.getElementById('add-veh-odometer').value = '';
+  fillVehicleMeta('add', { type: type || 'استمارة', alertBasis: (type || '').includes('زيت') ? 'odometer' : 'date' });
   document.getElementById('add-veh-custom-type').value = '';
   document.getElementById('add-veh-custom-row').style.display = 'none';
   document.getElementById('vehicle-add-doc-modal').style.display = 'flex';
@@ -5080,6 +5258,8 @@ function closeAddVehicleDocModal() {
 function onAddVehTypeChange() {
   document.getElementById('add-veh-custom-row').style.display =
     document.getElementById('add-veh-type').value === 'أخرى' ? 'block' : 'none';
+  document.getElementById('add-veh-basis').dataset.autoOil = '';
+  onVehicleAlertBasisChange('add');
 }
 
 async function saveAddVehicleDocModal() {
@@ -5091,8 +5271,10 @@ async function saveAddVehicleDocModal() {
     type = custom;
   }
   const due = document.getElementById('add-veh-due').value;
-  const odometer = document.getElementById('add-veh-odometer').value.trim();
-  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer, attachment: '' };
+  const error = validateVehicleAlertInput('add', due);
+  if (error) { alert(error); return; }
+  const { meta, note } = collectVehicleMeta('add');
+  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer: note, attachment: '', ...meta };
   if (apiOnline) {
     try {
       const res = await apiRequest('/vehicle-tasks', { method: 'POST', body: JSON.stringify(item) });
@@ -5111,13 +5293,23 @@ function closeNewVehicleModal() {
   document.getElementById('vehicle-new-modal').style.display = 'none';
 }
 
+function openNewVehicleModal() {
+  document.getElementById('new-veh-name').value = '';
+  document.getElementById('new-veh-due').value = '';
+  document.getElementById('new-veh-type').value = 'استمارة';
+  fillVehicleMeta('new', { type: 'استمارة', alertBasis: 'date' });
+  document.getElementById('vehicle-new-modal').style.display = 'flex';
+}
+
 async function saveNewVehicleModal() {
   const name = document.getElementById('new-veh-name').value.trim();
   const type = document.getElementById('new-veh-type').value;
   const due = document.getElementById('new-veh-due').value;
-  const odometer = document.getElementById('new-veh-odometer').value.trim();
   if (!name) { alert('أدخل اسم السيارة'); return; }
-  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer, attachment: '' };
+  const error = validateVehicleAlertInput('new', due);
+  if (error) { alert(error); return; }
+  const { meta, note } = collectVehicleMeta('new');
+  const item = { id: 'vehicle_' + Date.now(), name, type, due, odometer: note, attachment: '', ...meta };
   if (apiOnline) {
     try {
       const res = await apiRequest('/vehicle-tasks', { method: 'POST', body: JSON.stringify(item) });
@@ -5130,7 +5322,7 @@ async function saveNewVehicleModal() {
   closeNewVehicleModal();
   document.getElementById('new-veh-name').value = '';
   document.getElementById('new-veh-due').value = '';
-  document.getElementById('new-veh-odometer').value = '';
+  fillVehicleMeta('new', { type: 'استمارة', alertBasis: 'date' });
   showMsg('✅ تم إضافة السيارة');
   render();
 }
@@ -5407,12 +5599,18 @@ function renderAssetsAndTenders() {
         const slots = allSlots.map(slotType => {
           const doc = vehSlotFind(docs, slotType) || docs.find(d => d.type === slotType);
           if (doc) {
+            const state = vehicleAlertStatus(doc);
+            const meta = state.meta || vehicleMetaFromDoc(doc);
+            const estimate = vehicleEstimatedOdometer(meta);
             return `<div class="doc-slot">
               <div class="doc-slot-type">${htmlEscape(slotType)}</div>
               <div class="doc-slot-info">
                 ${doc.due ? `<div class="doc-slot-expires">${doc.due}</div>` : ''}
-                ${docStatusPill(doc.due)}
-                ${doc.odometer ? `<div class="doc-slot-expires" style="margin-top:2px">${htmlEscape(doc.odometer)}</div>` : ''}
+                ${statusPill(state.label, state.color)}
+                ${meta.dueOdometer ? `<div class="doc-slot-expires" style="margin-top:2px">عداد الاستحقاق: ${Number(meta.dueOdometer).toLocaleString()} كم</div>` : ''}
+                ${estimate ? `<div class="doc-slot-expires" style="margin-top:2px">العداد المتوقع: ${Number(estimate).toLocaleString()} كم</div>` : ''}
+                ${meta.lastOdometer ? `<div class="doc-slot-expires" style="margin-top:2px">آخر قراءة: ${Number(meta.lastOdometer).toLocaleString()} كم${meta.lastReadingDate ? ' — ' + meta.lastReadingDate : ''}</div>` : ''}
+                ${meta.note ? `<div class="doc-slot-expires" style="margin-top:2px">${htmlEscape(meta.note)}</div>` : ''}
               </div>
               ${can('assetManage') ? `<button class="doc-edit-btn" onclick="openEditVehicleDoc('${doc.id}')">✏️ تعديل</button>` : ''}
             </div>`;

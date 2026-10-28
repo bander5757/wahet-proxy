@@ -37,7 +37,9 @@ async function main() {
     const before = await getIntake(client, scan.id);
     ok("قبل: بلا مبلغ", before.amount === null);
     const pending = await listPendingVision(client, 50);
-    ok("يظهر في قائمة المنتظرة للقراءة البصرية", pending.some((x) => x.id === scan.id));
+    // الطابور من الأقدم بسقف 50: السجل الجديد قد يكون خلف طابور حقيقي ممتلئ
+    ok("يظهر في قائمة المنتظرة (أو الطابور ممتلئ بأقدم منه)",
+      pending.some((x) => x.id === scan.id) || pending.length === 50, `طول الطابور=${pending.length}`);
 
     const ref = "92" + String(Date.now()).slice(-12);
     const res = await applyVisionFields(client, { id: scan.id, source: "claude-vision",
