@@ -3295,7 +3295,10 @@ async function handleSalesInbound(client, payload, opts = {}) {
        payload.peach?.conversation_id != null ? String(payload.peach.conversation_id) : null])).rows[0];
   }
 
-  const ex = salesEngine.extractSalesFields(text, now);
+  // ── سجل المحادثة: ما قاله الوكيل وما سأله (مواضيع لا نصوص) ──
+  const history = salesEngine.buildHistory((await client.query(
+    "select text, extracted from sales_messages where lead_id=$1 and direction='out_suggested' order by created_at", [lead.id])).rows);
+  const ex = salesEngine.extractSalesFields(text, now, { lastAsked: history.lastAsked });
   let mediaMeta = null;
   if (mediaUrl) {
     mediaMeta = { name: payload.attachment_name || null, mime: payload.attachment_mime || null };
@@ -3316,9 +3319,6 @@ async function handleSalesInbound(client, payload, opts = {}) {
     [lead.id, provider, pmid, text, contentType, mediaUrl, mediaMeta ? JSON.stringify(mediaMeta) : null,
      JSON.stringify(ex), payload.message_timestamp || now.toISOString()]);
 
-  // ── سجل المحادثة: ما قاله الوكيل وما سأله (مواضيع لا نصوص) ──
-  const history = salesEngine.buildHistory((await client.query(
-    "select text, extracted from sales_messages where lead_id=$1 and direction='out_suggested' order by created_at", [lead.id])).rows);
 
   // ── الانتقالات ──
   const L = { ...lead };
