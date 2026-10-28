@@ -2363,7 +2363,7 @@ async function processAttachment(url, mime) {
   const isPdf = (got.contentType || "").includes("pdf") || (mime || "").includes("pdf");
   let text = "", fields = {};
   if (isPdf) {
-    try { text = pdfExtractText(got.buf) || ""; } catch (e) { text = ""; }
+    try { text = (await pdfExtractText(got.buf)) || ""; } catch (e) { text = ""; }
     if (text) fields = extractReceiptFields(text);
   }
   // تنظيف: بعض ملفات PDF تُخرج محارف تحكم/NUL تكسر التخزين في jsonb
@@ -3672,7 +3672,34 @@ async function dashboard(client, user) {
 
 // استخراج نص PDF بلا اعتماديات (FlateDecode + عوامل Tj/TJ).
 // مُتحقَّق على إيصال تحويل حقيقي: الحقول اللاتينية/الرقمية تُقرأ، والعربية مشوّهة (CMap مخصّص).
-function pdfExtractText(buf) {
+// استخراج نص PDF عبر pdfjs — يفك خطوط CID/Type0 العربية وخرائط ToUnicode.
+// الطريقة القديمة (أقواس + Tj) تبقى احتياطاً لملفات بسيطة يفشل فيها pdfjs.
+let _pdfjsMod = null;
+async function loadPdfjs() {
+  if (!_pdfjsMod) _pdfjsMod = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  return _pdfjsMod;
+}
+async function pdfExtractText(buf) {
+  try {
+    const pdfjs = await loadPdfjs();
+    const task = pdfjs.getDocument({
+      data: new Uint8Array(buf), isEvalSupported: false, disableFontFace: true, useSystemFonts: false,
+    });
+    const doc = await task.promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      pages.push(tc.items.map((it) => (it && it.str) || "").join(" "));
+      page.cleanup();
+    }
+    await task.destroy();
+    const out = pages.join("\n").replace(/[ \t]+/g, " ").trim();
+    if (out) return out;
+  } catch (_) { /* يسقط للاحتياطي */ }
+  try { return pdfExtractTextLegacy(buf); } catch (_) { return ""; }
+}
+function pdfExtractTextLegacy(buf) {
   const zlib = require("zlib");
   const s = buf.toString("latin1");
   const out = [];
@@ -4260,7 +4287,7 @@ module.exports.__m26 = {
 };
 // دوال P1.7 (المرفقات والاستخراج) لأغراض الاختبار فقط
 module.exports.__p17 = {
-  fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, ATTACHMENT_HOSTS, attachmentHostAllowed,
+  fetchAttachment, processAttachment, extractReceiptFields, pdfExtractText, pdfExtractTextLegacy, ATTACHMENT_HOSTS, attachmentHostAllowed,
   parseFinancialCaption, ruleClassify, matchAccountByIban,
 };
 // دوال P2.1 (وكيل المبيعات) لأغراض الاختبار فقط
